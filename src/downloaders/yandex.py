@@ -63,53 +63,49 @@ class YandexMusicDownloader(BaseDownloader):
         
         raise DownloadError("Could not extract track ID from URL")
 
-    async def _get_track_info_from_api_public(self, track_id: str, album_id: str = None) -> Optional[Dict]:
-        """Get track info from Yandex Music public API (no auth required)"""
-        logger.info(f"[Yandex] Fetching track info from public API: track={track_id}, album={album_id}")
+    async def _get_track_info_via_ytdlp(self, url: str) -> Optional[Dict]:
+        """Get track info using yt-dlp extract_info without downloading"""
+        logger.info(f"[Yandex] Extracting track info via yt-dlp: {url}")
         
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json',
-                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'skip_download': True,
             }
             
-            # Use public API endpoint
-            api_url = f"https://api.music.yandex.net/tracks/{track_id}"
-            
-            response = await asyncio.to_thread(requests.get, api_url, headers=headers, timeout=15)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('result') and len(data['result']) > 0:
-                    track = data['result'][0]
-                    title = track.get('title', '')
-                    artists = [a.get('name', '') for a in track.get('artists', [])]
-                    artist_str = ', '.join(artists) if artists else ''
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = await asyncio.to_thread(ydl.extract_info, url, download=False)
+                
+                if info:
+                    title = info.get('title', '')
+                    artist = info.get('artist', '') or info.get('uploader', '') or info.get('creator', '')
+                    album = info.get('album', '')
                     
-                    if title and artist_str:
-                        query = f"{artist_str} - {title}"
-                        logger.info(f"[Yandex] Got from API: {query}")
-                        return {'search_query': query, 'title': title, 'artist': artist_str}
+                    # Clean up title - remove "слушать онлайн" etc
+                    title = re.sub(r'\s*[-—]\s*(слушать|listen).*$', '', title, flags=re.IGNORECASE)
+                    
+                    if title and artist:
+                        query = f"{artist} - {title}"
+                        logger.info(f"[Yandex] Got from yt-dlp: {query}")
+                        return {'search_query': query, 'title': title, 'artist': artist, 'album': album}
                     elif title:
-                        logger.info(f"[Yandex] Got title from API: {title}")
+                        logger.info(f"[Yandex] Got title from yt-dlp: {title}")
                         return {'search_query': title, 'title': title}
-            
-            logger.info(f"[Yandex] Public API request failed: {response.status_code}")
-            
+                        
         except Exception as e:
-            logger.error(f"[Yandex] Public API error: {e}")
+            logger.info(f"[Yandex] yt-dlp extract failed: {e}")
         
         return None
 
     async def _get_track_info_from_page(self, url: str, track_id: str = None, album_id: str = None) -> Optional[Dict]:
-        """Get track info by fetching Yandex Music page HTML or API"""
+        """Get track info by fetching Yandex Music page HTML or via yt-dlp"""
         
-        # First try public API (more reliable)
-        if track_id:
-            api_result = await self._get_track_info_from_api_public(track_id, album_id)
-            if api_result:
-                return api_result
+        # First try yt-dlp (most reliable)
+        ytdlp_result = await self._get_track_info_via_ytdlp(url)
+        if ytdlp_result:
+            return ytdlp_result
         
         logger.info(f"[Yandex] Fetching track info from page: {url}")
         
