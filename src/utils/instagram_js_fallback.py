@@ -31,6 +31,55 @@ class InstagramJSFallback:
         """Validate that URL is from Instagram"""
         return any(domain in url.lower() for domain in ['instagram.com', 'instagr.am'])
     
+    def _extract_url_from_response(self, data) -> Optional[str]:
+        """
+        Recursively extract video/media URL from API response
+        Handles various response formats
+        """
+        if isinstance(data, str):
+            if data.startswith('http'):
+                return data
+            return None
+        
+        if isinstance(data, list):
+            for item in data:
+                url = self._extract_url_from_response(item)
+                if url:
+                    return url
+            return None
+        
+        if isinstance(data, dict):
+            # Priority keys to check for URL
+            url_keys = ['url', 'video', 'video_url', 'download_url', 'media_url', 'src']
+            
+            for key in url_keys:
+                if key in data:
+                    val = data[key]
+                    if isinstance(val, str) and val.startswith('http'):
+                        return val
+                    elif isinstance(val, dict):
+                        # Nested dict - recurse
+                        url = self._extract_url_from_response(val)
+                        if url:
+                            return url
+            
+            # Check 'data' field (common wrapper)
+            if 'data' in data:
+                url = self._extract_url_from_response(data['data'])
+                if url:
+                    return url
+            
+            # Check all values recursively
+            for key, val in data.items():
+                if key in ['thumbnail', 'thumb', 'preview']:
+                    continue  # Skip thumbnail fields
+                if isinstance(val, (dict, list)):
+                    url = self._extract_url_from_response(val)
+                    if url:
+                        return url
+        
+        return None
+    
     async def get_video_url(self, url: str) -> Optional[str]:
         """
         Get direct video URL from JS API
@@ -64,26 +113,14 @@ class InstagramJSFallback:
                         logger.error(f"[JS Fallback] Failed to parse JSON: {text[:200]}")
                         return None
                     
-                    logger.debug(f"[JS Fallback] API response type: {type(data)}, data: {str(data)[:200]}")
+                    # Log full response for debugging
+                    logger.info(f"[JS Fallback] API response: {str(data)[:500]}")
                     
-                    # API returns: {'status': True, 'data': [{'url': '...', 'thumbnail': '...'}]}
-                    video_url = None
+                    # Extract URL from various response formats
+                    video_url = self._extract_url_from_response(data)
                     
-                    if isinstance(data, dict):
-                        if data.get('status') and data.get('data'):
-                            # data['data'] is a list of media items
-                            media_list = data['data']
-                            if isinstance(media_list, list) and len(media_list) > 0:
-                                first_item = media_list[0]
-                                if isinstance(first_item, dict):
-                                    video_url = first_item.get('url')
-                                    logger.debug(f"[JS Fallback] Extracted URL from data[0]: {video_url[:100] if video_url else 'None'}...")
-                        
-                        # Fallback: check if 'url' is directly in response (old format)
-                        if not video_url:
-                            video_url = data.get('url')
-                            if video_url:
-                                logger.debug(f"[JS Fallback] Extracted URL from root: {video_url[:100] if isinstance(video_url, str) else type(video_url)}...")
+                    if video_url:
+                        logger.info(f"[JS Fallback] Extracted URL: {video_url[:100]}...")
                     
                     # Validate that video_url is actually a URL string
                     if not video_url:

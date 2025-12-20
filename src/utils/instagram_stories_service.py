@@ -1,18 +1,24 @@
 """
 Instagram Stories Download Service
 Downloads public Instagram stories without login
+Uses multiple fallback services including JS API
 """
 
 import asyncio
 import logging
 import aiohttp
 import re
+import os
 from typing import Optional, Tuple, List, Dict
 from pathlib import Path
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
 STORIES_TIMEOUT = 30
+
+# JS API URL (same as instagram_js_fallback uses)
+JS_API_BASE_URL = os.getenv("JS_API_URL", "http://localhost:3000")
 
 
 class InstagramStoriesService:
@@ -23,7 +29,6 @@ class InstagramStoriesService:
     
     def _extract_username_from_story_url(self, url: str) -> Optional[str]:
         """Extract username from Instagram story URL"""
-        # Pattern: instagram.com/stories/username/story_id
         match = re.search(r'instagram\.com/stories/([^/]+)', url)
         if match:
             return match.group(1)
@@ -35,6 +40,94 @@ class InstagramStoriesService:
         if match:
             return match.group(1)
         return None
+    
+    def _extract_url_from_data(self, data) -> Optional[str]:
+        """Recursively extract URL from nested response"""
+        if isinstance(data, str):
+            if data.startswith('http'):
+                return data
+            return None
+        
+        if isinstance(data, list):
+            for item in data:
+                url = self._extract_url_from_data(item)
+                if url:
+                    return url
+            return None
+        
+        if isinstance(data, dict):
+            # Priority keys
+            for key in ['url', 'video', 'video_url', 'download_url', 'media_url', 'src']:
+                if key in data:
+                    val = data[key]
+                    if isinstance(val, str) and val.startswith('http'):
+                        return val
+                    elif isinstance(val, (dict, list)):
+                        url = self._extract_url_from_data(val)
+                        if url:
+                            return url
+            
+            # Check 'data' wrapper
+            if 'data' in data:
+                url = self._extract_url_from_data(data['data'])
+                if url:
+                    return url
+            
+            # Check all values
+            for key, val in data.items():
+                if key in ['thumbnail', 'thumb', 'preview']:
+                    continue
+                if isinstance(val, (dict, list)):
+                    url = self._extract_url_from_data(val)
+                    if url:
+                        return url
+        
+        return None
+
+    async def _try_js_api(self, url: str) -> Optional[List[Dict]]:
+        """Try local Node.js API (snapsave-based) - most reliable"""
+        try:
+            encoded_url = quote(url, safe='')
+            api_url = f"{JS_API_BASE_URL}/igdl?url={encoded_url}"
+            logger.info(f"[Stories JS API] Requesting...")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    api_url,
+                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        logger.debug(f"[Stories JS API] Failed: {response.status}")
+                        return None
+                    
+                    try:
+                        data = await response.json()
+                    except:
+                        logger.debug("[Stories JS API] Failed to parse JSON")
+                        return None
+                    
+                    logger.info(f"[Stories JS API] Response: {str(data)[:500]}")
+                    
+                    # Extract URL using recursive helper
+                    media_url = self._extract_url_from_data(data)
+                    
+                    if media_url:
+                        is_video = '.mp4' in media_url.lower() or 'video' in media_url.lower()
+                        logger.info(f"[Stories JS API] Found URL: {media_url[:100]}...")
+                        return [{
+                            'type': 'video' if is_video else 'photo',
+                            'url': media_url
+                        }]
+                    
+                    logger.debug("[Stories JS API] No URL found in response")
+                    return None
+                    
+        except aiohttp.ClientConnectorError:
+            logger.debug("[Stories JS API] Cannot connect to Node.js service")
+            return None
+        except Exception as e:
+            logger.debug(f"[Stories JS API] Error: {e}")
+            return None
 
     async def _try_igram(self, url: str) -> Optional[List[Dict]]:
         """Try igram.world API"""
@@ -58,66 +151,24 @@ class InstagramStoriesService:
                         return None
                     
                     data = await response.json()
-                    items = data.get('result', [])
                     
-                    if not items:
-                        logger.debug("[iGram] No results")
-                        return None
+                    # Check for media array
+                    media = data.get('media') or data.get('items') or []
+                    if not media and data.get('url'):
+                        media = [{'url': data['url'], 'type': data.get('type', 'video')}]
                     
                     stories = []
-                    for item in items:
-                        media_url = item.get('url')
-                        if not media_url:
-                            continue
-                        
-                        # Determine type by URL
-                        is_video = '.mp4' in media_url or 'video' in media_url
-                        stories.append({
-                            'type': 'video' if is_video else 'photo',
-                            'url': media_url
-                        })
+                    for item in media:
+                        if isinstance(item, dict) and item.get('url'):
+                            stories.append({
+                                'type': item.get('type', 'video'),
+                                'url': item['url']
+                            })
                     
                     return stories if stories else None
                     
         except Exception as e:
             logger.debug(f"[iGram] Error: {e}")
-            return None
-
-    async def _try_savegram(self, url: str) -> Optional[List[Dict]]:
-        """Try savegram.app API"""
-        try:
-            api_url = "https://savegram.app/api/instagram"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    api_url,
-                    data={"url": url},
-                    headers={
-                        'User-Agent': self._user_agent,
-                        'Origin': 'https://savegram.app',
-                        'Referer': 'https://savegram.app/'
-                    },
-                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
-                ) as response:
-                    if response.status != 200:
-                        logger.debug(f"[SaveGram] API failed: {response.status}")
-                        return None
-                    
-                    data = await response.json()
-                    
-                    # Check for media URL in response
-                    media_url = data.get('url') or data.get('video') or data.get('image')
-                    if media_url:
-                        is_video = '.mp4' in media_url or 'video' in str(data.get('type', ''))
-                        return [{
-                            'type': 'video' if is_video else 'photo',
-                            'url': media_url
-                        }]
-                    
-                    return None
-                    
-        except Exception as e:
-            logger.debug(f"[SaveGram] Error: {e}")
             return None
 
     async def _try_saveig(self, url: str) -> Optional[List[Dict]]:
@@ -155,7 +206,6 @@ class InstagramStoriesService:
                     html = data.get('data', '')
                     
                     # Find download URLs in HTML
-                    import re
                     video_urls = re.findall(r'href="([^"]+\.mp4[^"]*)"', html)
                     image_urls = re.findall(r'href="([^"]+\.jpg[^"]*)"', html)
                     
@@ -172,13 +222,57 @@ class InstagramStoriesService:
             logger.debug(f"[SaveIG] Error: {e}")
             return None
 
+    async def _try_savegram(self, url: str) -> Optional[List[Dict]]:
+        """Try savegram.app API"""
+        try:
+            api_url = "https://savegram.app/api/instagram"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json={"url": url},
+                    headers={
+                        'User-Agent': self._user_agent,
+                        'Content-Type': 'application/json',
+                        'Origin': 'https://savegram.app',
+                        'Referer': 'https://savegram.app/'
+                    },
+                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        logger.debug(f"[SaveGram] API failed: {response.status}")
+                        return None
+                    
+                    data = await response.json()
+                    
+                    # Check for media URL in response
+                    media_url = data.get('url') or data.get('video') or data.get('image')
+                    if media_url:
+                        is_video = '.mp4' in media_url or 'video' in str(data.get('type', ''))
+                        return [{
+                            'type': 'video' if is_video else 'photo',
+                            'url': media_url
+                        }]
+                    
+                    return None
+                    
+        except Exception as e:
+            logger.debug(f"[SaveGram] Error: {e}")
+            return None
+
     async def get_stories(self, url: str) -> Optional[List[Dict]]:
         """Get stories from Instagram URL"""
         username = self._extract_username_from_story_url(url)
         story_id = self._extract_story_id(url)
         logger.info(f"[Stories] Getting stories for @{username}, story_id={story_id}")
         
-        # Try iGram first
+        # Try JS API first (most reliable - uses snapsave)
+        stories = await self._try_js_api(url)
+        if stories:
+            logger.info(f"[Stories] Got {len(stories)} stories from JS API")
+            return stories
+        
+        # Try iGram
         stories = await self._try_igram(url)
         if stories:
             logger.info(f"[Stories] Got {len(stories)} stories from iGram")
@@ -239,7 +333,6 @@ class InstagramStoriesService:
                         progress_callback('status_downloading', 70)
                     
                     # Generate filename
-                    import os
                     ext = 'mp4' if media_type == 'video' else 'jpg'
                     filename = f"instagram_story_{os.urandom(4).hex()}.{ext}"
                     file_path = download_dir / filename
