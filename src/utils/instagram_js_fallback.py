@@ -33,8 +33,8 @@ class InstagramJSFallback:
     
     def _extract_url_from_response(self, data) -> Optional[str]:
         """
-        Recursively extract video/media URL from API response
-        Handles various response formats
+        Recursively extract video/media URL from API response.
+        Prioritizes 'url' field over 'thumbnail' to get video not image.
         """
         if isinstance(data, str):
             if data.startswith('http'):
@@ -42,6 +42,13 @@ class InstagramJSFallback:
             return None
         
         if isinstance(data, list):
+            # For list of items, extract URL from first item that has 'url' key
+            for item in data:
+                if isinstance(item, dict) and 'url' in item:
+                    val = item['url']
+                    if isinstance(val, str) and val.startswith('http'):
+                        return val
+            # Fallback: recurse into list items
             for item in data:
                 url = self._extract_url_from_response(item)
                 if url:
@@ -49,29 +56,27 @@ class InstagramJSFallback:
             return None
         
         if isinstance(data, dict):
-            # Priority keys to check for URL
-            url_keys = ['url', 'video', 'video_url', 'download_url', 'media_url', 'src']
-            
-            for key in url_keys:
-                if key in data:
-                    val = data[key]
-                    if isinstance(val, str) and val.startswith('http'):
-                        return val
-                    elif isinstance(val, dict):
-                        # Nested dict - recurse
-                        url = self._extract_url_from_response(val)
-                        if url:
-                            return url
-            
-            # Check 'data' field (common wrapper)
+            # First check 'data' wrapper (common in API responses)
             if 'data' in data:
                 url = self._extract_url_from_response(data['data'])
                 if url:
                     return url
             
-            # Check all values recursively
+            # Priority keys for video URL (NOT thumbnail)
+            video_keys = ['url', 'video', 'video_url', 'download_url', 'media_url', 'src']
+            for key in video_keys:
+                if key in data:
+                    val = data[key]
+                    if isinstance(val, str) and val.startswith('http'):
+                        return val
+                    elif isinstance(val, (dict, list)):
+                        url = self._extract_url_from_response(val)
+                        if url:
+                            return url
+            
+            # Check all values except thumbnails
             for key, val in data.items():
-                if key in ['thumbnail', 'thumb', 'preview']:
+                if key in ['thumbnail', 'thumb', 'preview', 'cover']:
                     continue  # Skip thumbnail fields
                 if isinstance(val, (dict, list)):
                     url = self._extract_url_from_response(val)

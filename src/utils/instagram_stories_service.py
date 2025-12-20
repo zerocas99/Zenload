@@ -42,13 +42,23 @@ class InstagramStoriesService:
         return None
     
     def _extract_url_from_data(self, data) -> Optional[str]:
-        """Recursively extract URL from nested response"""
+        """
+        Recursively extract video/media URL from nested response.
+        Prioritizes 'url' field over 'thumbnail' to get video not image.
+        """
         if isinstance(data, str):
             if data.startswith('http'):
                 return data
             return None
         
         if isinstance(data, list):
+            # For list of items, extract URL from first item that has 'url' key
+            for item in data:
+                if isinstance(item, dict) and 'url' in item:
+                    val = item['url']
+                    if isinstance(val, str) and val.startswith('http'):
+                        return val
+            # Fallback: recurse into list items
             for item in data:
                 url = self._extract_url_from_data(item)
                 if url:
@@ -56,8 +66,15 @@ class InstagramStoriesService:
             return None
         
         if isinstance(data, dict):
-            # Priority keys
-            for key in ['url', 'video', 'video_url', 'download_url', 'media_url', 'src']:
+            # First check 'data' wrapper (common in API responses)
+            if 'data' in data:
+                url = self._extract_url_from_data(data['data'])
+                if url:
+                    return url
+            
+            # Priority keys for video URL (NOT thumbnail)
+            video_keys = ['url', 'video', 'video_url', 'download_url', 'media_url', 'src']
+            for key in video_keys:
                 if key in data:
                     val = data[key]
                     if isinstance(val, str) and val.startswith('http'):
@@ -67,16 +84,10 @@ class InstagramStoriesService:
                         if url:
                             return url
             
-            # Check 'data' wrapper
-            if 'data' in data:
-                url = self._extract_url_from_data(data['data'])
-                if url:
-                    return url
-            
-            # Check all values
+            # Check all values except thumbnails
             for key, val in data.items():
-                if key in ['thumbnail', 'thumb', 'preview']:
-                    continue
+                if key in ['thumbnail', 'thumb', 'preview', 'cover']:
+                    continue  # Skip thumbnail fields
                 if isinstance(val, (dict, list)):
                     url = self._extract_url_from_data(val)
                     if url:
@@ -310,7 +321,6 @@ class InstagramStoriesService:
         # Get the first (or specific) story
         story = stories[0]
         media_url = story.get('url')
-        media_type = story.get('type')
         
         if not media_url:
             return None, None
@@ -332,14 +342,30 @@ class InstagramStoriesService:
                     if progress_callback:
                         progress_callback('status_downloading', 70)
                     
-                    # Generate filename
-                    ext = 'mp4' if media_type == 'video' else 'jpg'
+                    # Determine type by content-type header (more reliable than URL)
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    logger.info(f"[Stories] Content-Type: {content_type}")
+                    
+                    # Check if it's video
+                    is_video = 'video' in content_type or 'mp4' in content_type
+                    
+                    # If content-type is octet-stream, check first bytes for video signature
+                    content = await response.read()
+                    
+                    if 'octet-stream' in content_type or not content_type:
+                        # Check for MP4 signature (ftyp)
+                        if len(content) > 8:
+                            # MP4 files have 'ftyp' at offset 4
+                            if content[4:8] == b'ftyp':
+                                is_video = True
+                                logger.info("[Stories] Detected MP4 by file signature")
+                    
+                    ext = 'mp4' if is_video else 'jpg'
                     filename = f"instagram_story_{os.urandom(4).hex()}.{ext}"
                     file_path = download_dir / filename
                     
                     download_dir.mkdir(exist_ok=True)
                     
-                    content = await response.read()
                     with open(file_path, 'wb') as f:
                         f.write(content)
                     
@@ -347,7 +373,7 @@ class InstagramStoriesService:
                         progress_callback('status_downloading', 100)
                     
                     if file_path.exists() and file_path.stat().st_size > 1000:
-                        logger.info(f"[Stories] Download successful: {file_path}")
+                        logger.info(f"[Stories] Download successful: {file_path} (video={is_video})")
                         return filename, file_path
                     
                     return None, None
