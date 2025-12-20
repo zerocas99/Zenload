@@ -9,6 +9,8 @@ import logging
 import aiohttp
 import re
 import os
+import base64
+import json
 from typing import Optional, Tuple, List, Dict
 from pathlib import Path
 from urllib.parse import quote
@@ -147,6 +149,54 @@ class InstagramStoriesService:
             logger.debug(f"[Stories JS API] Error: {e}")
             return None
     
+    def _decode_jwt_url(self, token_url: str) -> Optional[str]:
+        """Try to decode JWT token from rapidcdn URL to get original Instagram URL"""
+        try:
+            # Extract token from URL like https://d.rapidcdn.app/v2?token=...
+            if 'token=' not in token_url:
+                return None
+            
+            token = token_url.split('token=')[1].split('&')[0]
+            
+            # JWT has 3 parts: header.payload.signature
+            parts = token.split('.')
+            if len(parts) < 2:
+                return None
+            
+            # Decode payload (second part)
+            payload = parts[1]
+            # Add padding if needed
+            padding = 4 - len(payload) % 4
+            if padding != 4:
+                payload += '=' * padding
+            
+            decoded = base64.urlsafe_b64decode(payload)
+            data = json.loads(decoded)
+            
+            # The payload should contain 'url' with original Instagram URL
+            return data.get('url')
+        except Exception as e:
+            logger.debug(f"[Stories] JWT decode failed: {e}")
+            return None
+    
+    def _extract_story_id_from_instagram_url(self, url: str) -> Optional[str]:
+        """Extract story ID from Instagram CDN URL (ig_cache_key parameter)"""
+        # Instagram URLs contain ig_cache_key which is the story ID
+        # Example: ig_cache_key=Mzc5MTM4NDQzMDI1MDc0MDcyMQ%3D%3D
+        match = re.search(r'ig_cache_key=([A-Za-z0-9%=]+)', url)
+        if match:
+            try:
+                encoded = match.group(1)
+                # URL decode
+                from urllib.parse import unquote
+                encoded = unquote(encoded)
+                # Base64 decode
+                decoded = base64.b64decode(encoded).decode('utf-8')
+                return decoded
+            except:
+                pass
+        return None
+
     def _extract_all_media_from_data(self, data, story_id: str = None) -> Optional[List[Dict]]:
         """Extract all media items from API response, optionally filtering by story_id"""
         items = []
@@ -161,34 +211,64 @@ class InstagramStoriesService:
         if not isinstance(data, list):
             return None
         
-        for item in data:
+        logger.info(f"[Stories] Processing {len(data)} items, looking for story_id={story_id}")
+        
+        for idx, item in enumerate(data):
             if isinstance(item, dict) and 'url' in item:
                 url = item['url']
                 if isinstance(url, str) and url.startswith('http'):
-                    # Check if this item matches the story_id (if provided)
-                    # Story ID might be in the URL or in item metadata
-                    item_id = None
+                    item_matched = False
+                    
                     if story_id:
-                        # Try to extract ID from URL
-                        if story_id in url:
-                            item_id = story_id
-                        # Check if item has id field
-                        elif item.get('id') and story_id in str(item.get('id')):
-                            item_id = story_id
+                        # Method 1: Decode JWT token to get original Instagram URL
+                        original_url = self._decode_jwt_url(url)
+                        if original_url:
+                            # Extract story ID from original Instagram URL
+                            extracted_id = self._extract_story_id_from_instagram_url(original_url)
+                            if extracted_id and extracted_id == story_id:
+                                item_matched = True
+                                logger.info(f"[Stories] Found story_id via JWT decode at index {idx}")
+                            
+                            # Also check if story_id is directly in the original URL
+                            if story_id in original_url:
+                                item_matched = True
+                                logger.info(f"[Stories] Found story_id in original URL at index {idx}")
+                        
+                        # Method 2: Check thumbnail JWT
+                        thumb = item.get('thumbnail', '')
+                        if thumb and not item_matched:
+                            thumb_original = self._decode_jwt_url(thumb)
+                            if thumb_original:
+                                extracted_id = self._extract_story_id_from_instagram_url(thumb_original)
+                                if extracted_id and extracted_id == story_id:
+                                    item_matched = True
+                                    logger.info(f"[Stories] Found story_id via thumbnail JWT at index {idx}")
+                        
+                        # Method 3: Direct string search in item
+                        if not item_matched:
+                            item_str = str(item)
+                            if story_id in item_str:
+                                item_matched = True
+                                logger.info(f"[Stories] Found story_id in item string at index {idx}")
                     
                     is_video = '.mp4' in url.lower() or 'video' in url.lower()
                     media_item = {
                         'type': 'video' if is_video else 'photo',
                         'url': url,
-                        'matched_id': item_id
+                        'index': idx,
+                        'matched': item_matched
                     }
                     
-                    # If we have a story_id and this item matches, return it immediately
-                    if story_id and item_id:
-                        logger.info(f"[Stories] Found matching story by ID: {story_id}")
+                    # If we found matching story, return it immediately
+                    if item_matched:
+                        logger.info(f"[Stories] Returning matched story at index {idx}")
                         return [media_item]
                     
                     items.append(media_item)
+        
+        # If no match found and we have story_id, log warning
+        if story_id and items:
+            logger.warning(f"[Stories] Could not find story_id {story_id} in {len(items)} items, returning first")
         
         return items if items else None
 
