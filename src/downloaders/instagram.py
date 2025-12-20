@@ -1,4 +1,4 @@
-"""Instagram downloader using Cobalt API with yt-dlp fallback"""
+"""Instagram downloader using Cobalt API with alternative services and yt-dlp fallback"""
 
 import re
 import logging
@@ -9,6 +9,7 @@ import yt_dlp
 
 from .base import BaseDownloader, DownloadError
 from ..utils.cobalt_service import cobalt
+from ..utils.instagram_api import instagram_api
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +74,14 @@ class InstagramDownloader(BaseDownloader):
             return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download video - Cobalt first, yt-dlp fallback"""
+        """Download video - Cobalt first, alternative APIs, then yt-dlp fallback"""
         shortcode = self._extract_shortcode(url) or 'video'
         logger.info(f"[Instagram] Downloading: {shortcode}")
         
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
         
-        # === Try Cobalt ===
+        # === 1. Try Cobalt ===
         self.update_progress('status_downloading', 10)
         filename, file_path = await cobalt.download(
             url, 
@@ -92,9 +93,23 @@ class InstagramDownloader(BaseDownloader):
             metadata = f"Instagram\n<a href=\"{url}\">Ссылка</a>"
             return metadata, file_path
         
-        # === Fallback to yt-dlp ===
-        logger.info("[Instagram] Cobalt failed, trying yt-dlp")
-        self.update_progress('status_downloading', 30)
+        # === 2. Try Alternative Instagram APIs ===
+        logger.info("[Instagram] Cobalt failed, trying alternative APIs")
+        self.update_progress('status_downloading', 20)
+        
+        filename, file_path = await instagram_api.download(
+            url,
+            download_dir,
+            progress_callback=self.update_progress
+        )
+        
+        if file_path and file_path.exists():
+            metadata = f"Instagram\n<a href=\"{url}\">Ссылка</a>"
+            return metadata, file_path
+        
+        # === 3. Fallback to yt-dlp ===
+        logger.info("[Instagram] Alternative APIs failed, trying yt-dlp")
+        self.update_progress('status_downloading', 40)
         
         try:
             ydl_opts = self.ydl_opts.copy()
