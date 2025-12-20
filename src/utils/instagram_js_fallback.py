@@ -56,10 +56,23 @@ class InstagramJSFallback:
                         return None
                     
                     data = await response.json()
-                    video_url = data.get('url')
+                    logger.debug(f"[JS Fallback] API response: {data}")
+                    
+                    # API returns: {'status': True, 'data': [{'url': '...', 'thumbnail': '...'}]}
+                    video_url = None
+                    
+                    if data.get('status') and data.get('data'):
+                        # data['data'] is a list of media items
+                        media_list = data['data']
+                        if isinstance(media_list, list) and len(media_list) > 0:
+                            video_url = media_list[0].get('url')
+                    
+                    # Fallback: check if 'url' is directly in response (old format)
+                    if not video_url:
+                        video_url = data.get('url')
                     
                     if not video_url:
-                        logger.error("[JS Fallback] No 'url' field in response")
+                        logger.error(f"[JS Fallback] No video URL in response: {data}")
                         return None
                     
                     logger.info("[JS Fallback] Got video URL successfully")

@@ -61,7 +61,8 @@ class YouTubeDownloader(BaseDownloader):
             format_str = format_id
         else:
             # Prefer single file formats that don't need merging
-            format_str = 'best[ext=mp4]/best[ext=webm]/best'
+            # Try best quality mp4, then any best format available
+            format_str = 'best[ext=mp4][height<=1080]/best[ext=mp4]/best[height<=1080]/best/bestvideo*+bestaudio/bestvideo*'
         
         opts = {
             'format': format_str,
