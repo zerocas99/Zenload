@@ -39,6 +39,28 @@ class TikTokDownloader(BaseDownloader):
             return url
         return url.split('?')[0]
 
+    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool]:
+        """
+        Try to get direct URL for fast sending (without downloading to server).
+        Returns: (direct_url, metadata, is_audio)
+        """
+        try:
+            result = await asyncio.wait_for(
+                cobalt.request(url),
+                timeout=10
+            )
+            
+            if result.success and result.url:
+                metadata = f"TikTok\n<a href=\"{url}\">Ссылка</a>"
+                is_audio = result.url.endswith(('.mp3', '.m4a', '.wav'))
+                logger.info(f"[TikTok] Got direct URL from Cobalt")
+                return result.url, metadata, is_audio
+                
+        except Exception as e:
+            logger.debug(f"[TikTok] get_direct_url failed: {e}")
+        
+        return None, None, False
+
     async def get_formats(self, url: str) -> List[Dict]:
         """Get available formats"""
         self.update_progress('status_getting_info', 0)

@@ -100,6 +100,35 @@ class DownloadWorker:
         except Exception as e:
             logger.error(f"Error in progress callback: {str(e)}")
 
+    async def _try_direct_url_send(self, update: Update, direct_url: str, is_audio: bool = False, caption: str = None) -> bool:
+        """Try to send media directly via URL (fast method). Returns True if successful."""
+        try:
+            if is_audio:
+                await update.effective_message.reply_audio(
+                    audio=direct_url,
+                    caption=caption,
+                    parse_mode='HTML',
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=10,
+                    pool_timeout=10
+                )
+            else:
+                await update.effective_message.reply_video(
+                    video=direct_url,
+                    caption=caption,
+                    parse_mode='HTML',
+                    supports_streaming=True,
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=10,
+                    pool_timeout=10
+                )
+            return True
+        except Exception as e:
+            logger.debug(f"Direct URL send failed: {e}")
+            return False
+
     async def process_download(self, downloader, url: str, update: Update, status_message: Message, format_id: str = None) -> None:
         """Process content download with error handling and cleanup"""
         user_id = update.effective_user.id
@@ -130,8 +159,27 @@ class DownloadWorker:
             # Initial status
             await self.update_status(status_message, user_id, 'status_getting_info', 0)
             
-            # Download content
-            metadata, file_path = await downloader.download(url, format_id)
+            # Try to get direct URL first (fast method)
+            direct_url = None
+            is_audio = False
+            metadata = None
+            
+            if hasattr(downloader, 'get_direct_url'):
+                try:
+                    direct_url, metadata, is_audio = await downloader.get_direct_url(url)
+                    if direct_url:
+                        logger.info(f"Got direct URL, trying fast send...")
+                        if await self._try_direct_url_send(update, direct_url, is_audio, metadata):
+                            logger.info("Fast direct URL send successful!")
+                            await status_message.delete()
+                            return
+                        logger.info("Direct URL send failed, falling back to download...")
+                except Exception as e:
+                    logger.debug(f"get_direct_url failed: {e}")
+            
+            # Fallback: Download content to server
+            result = await downloader.download(url, format_id)
+            metadata, file_path = result
             logger.info(f"Download completed. File path: {file_path}")
             
             # Sending phase
