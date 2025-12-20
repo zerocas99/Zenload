@@ -25,6 +25,7 @@ class InstagramDownloader(BaseDownloader):
             'quiet': True,
             'no_warnings': True,
         })
+        self._metadata_template = "Instagram\n{url}"
 
     def _extract_shortcode(self, url: str) -> Optional[str]:
         """Extract shortcode from Instagram URL"""
@@ -63,7 +64,7 @@ class InstagramDownloader(BaseDownloader):
                 with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                     return ydl.extract_info(url, download=False)
             
-            info = await asyncio.to_thread(extract)
+            _ = await asyncio.to_thread(extract)
             self.update_progress('status_getting_info', 100)
             
             return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
@@ -90,7 +91,7 @@ class InstagramDownloader(BaseDownloader):
         )
         
         if file_path and file_path.exists():
-            metadata = f"Instagram\n<a href=\"{url}\">Ссылка</a>"
+            metadata = self._metadata_template.format(url=url)
             return metadata, file_path
         
         # === 2. Try Alternative Instagram APIs ===
@@ -104,7 +105,7 @@ class InstagramDownloader(BaseDownloader):
         )
         
         if file_path and file_path.exists():
-            metadata = f"Instagram\n<a href=\"{url}\">Ссылка</a>"
+            metadata = self._metadata_template.format(url=url)
             return metadata, file_path
         
         # === 3. Fallback to yt-dlp ===
@@ -125,7 +126,7 @@ class InstagramDownloader(BaseDownloader):
                 raise DownloadError("Failed to download video")
             
             # Find file
-            filename = f"instagram_{shortcode}.mp4" # Assuming mp4
+            filename = f"instagram_{shortcode}.mp4"  # Assuming mp4
             file_path = download_dir / filename
             
             # If exact filename not found, try to find what yt-dlp saved
@@ -135,11 +136,11 @@ class InstagramDownloader(BaseDownloader):
                     break
             
             if not file_path.exists():
-                 raise DownloadError("File downloaded but not found")
+                raise DownloadError("File downloaded but not found")
 
-            metadata = f"Instagram\n<a href=\"{url}\">Ссылка</a>"
+            metadata = self._metadata_template.format(url=url)
             return metadata, file_path
             
         except Exception as e:
             logger.error(f"[Instagram] Download failed: {e}")
-            raise DownloadError(f"Ошибка загрузки: {str(e)}")
+            raise DownloadError(f"Instagram download failed: {str(e)}")

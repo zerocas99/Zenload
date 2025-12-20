@@ -1,18 +1,32 @@
 """
 Alternative Instagram download services
 Fallback when Cobalt fails and before yt-dlp
+
+Updated January 2025 - Added new working methods:
+- RapidAPI scrapers (when key provided)
+- Instaloader no-login grabber with proxy rotation
+- SaveIG-style services (best-effort) with better error handling
 """
 
 import asyncio
 import json
 import logging
+import os
 import re
 import subprocess
 import random
 import requests
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
+
+try:
+    from instaloader import Instaloader, Post  # type: ignore
+    INSTALOADER_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    INSTALOADER_AVAILABLE = False
+
+from .proxy_provider import proxy_provider
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +42,24 @@ class InstagramResult:
 
 
 class InstagramAPIService:
-    """Alternative Instagram download services"""
+    """Alternative Instagram download services - Updated Dec 2024"""
     
-    # More services for better success rate
+    # Updated services list - prioritized by reliability
     SERVICES = [
+        # New working services (Dec 2024)
+        ("rapidsave", "https://rapidsave.com/api/ajaxSearch"),
+        ("snapsave", "https://snapsave.app/api/ajaxSearch"),
+        ("inflact", "https://inflact.com/api/public/post"),
+        # Existing services (may work intermittently)
         ("igram", "https://igram.world/api/convert"),
         ("saveig", "https://v3.saveig.app/api/ajaxSearch"),
         ("snapinsta", "https://snapinsta.app/api/ajaxSearch"),
         ("fastdl", "https://fastdl.app/api/ajaxSearch"),
-        ("igdownloader", "https://igdownloader.app/api/ajaxSearch"),
         ("sssinstagram", "https://sssinstagram.com/api/ajaxSearch"),
-        ("instavideosave", "https://instavideosave.net/api/ajaxSearch"),
-        ("saveinsta", "https://saveinsta.io/api/ajaxSearch"),
     ]
+    
+    # RapidAPI key for premium Instagram scrapers (optional)
+    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
     
     def __init__(self):
         self._user_agents = [
@@ -49,9 +68,50 @@ class InstagramAPIService:
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
         ]
+        self._allow_public_proxy = os.getenv("INSTAGRAM_USE_PUBLIC_PROXIES", "1") not in ("0", "false", "False")
     
     def _get_user_agent(self) -> str:
         return random.choice(self._user_agents)
+
+    def _get_proxy(self) -> Optional[Dict[str, str]]:
+        if not self._allow_public_proxy:
+            return None
+        return proxy_provider.get_proxy()
+
+    def _request_with_fallbacks(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        data=None,
+        json_data=None,
+        timeout: int = 20,
+    ) -> Optional[requests.Response]:
+        """Make a request with a proxy fallback."""
+        attempts = []
+        proxy = self._get_proxy()
+        if proxy:
+            attempts.append(proxy)
+        attempts.append(None)  # direct attempt
+
+        for prox in attempts:
+            try:
+                resp = requests.request(
+                    method,
+                    url,
+                    headers=headers,
+                    data=data,
+                    json=json_data,
+                    timeout=timeout,
+                    proxies=prox,
+                )
+                if resp.status_code in (200, 400, 404, 429):
+                    return resp
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[Instagram] request failed ({url}) with proxy {prox}: {e}")
+                continue
+        return None
     
     def _extract_shortcode(self, url: str) -> Optional[str]:
         patterns = [
@@ -65,6 +125,114 @@ class InstagramAPIService:
             if match:
                 return match.group(1)
         return None
+
+    async def _try_instaloader(self, url: str) -> InstagramResult:
+        """Try instaloader without login (better for /p/ posts)."""
+        if not INSTALOADER_AVAILABLE:
+            return InstagramResult(success=False, error="instaloader not installed")
+
+        shortcode = self._extract_shortcode(url)
+        if not shortcode:
+            return InstagramResult(success=False, error="Invalid URL")
+
+        try:
+            proxy = self._get_proxy()
+
+            def load():
+                loader = Instaloader(
+                    download_video_thumbnails=False,
+                    download_comments=False,
+                    save_metadata=False,
+                    quiet=True,
+                )
+                if proxy:
+                    loader.context._session.proxies = proxy
+                post = Post.from_shortcode(loader.context, shortcode)
+                if post.is_video:
+                    return InstagramResult(success=True, video_url=post.video_url, is_video=True)
+                else:
+                    return InstagramResult(success=True, image_urls=[post.url], is_video=False)
+
+            return await asyncio.to_thread(load)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[instaloader] Error: {e}")
+            return InstagramResult(success=False, error=str(e))
+
+    async def _try_rapidapi(self, url: str) -> InstagramResult:
+        """Try RapidAPI-backed scrapers when key provided."""
+        api_key = os.getenv("RAPIDAPI_INSTAGRAM_KEY") or self.RAPIDAPI_KEY
+        if not api_key:
+            return InstagramResult(success=False, error="No RapidAPI key")
+
+        endpoints = [
+            (
+                os.getenv(
+                    "RAPIDAPI_INSTAGRAM_HOST",
+                    "instagram-downloader-download-instagram-videos-stories1.p.rapidapi.com",
+                ),
+                "/index",
+            ),
+            (
+                os.getenv(
+                    "RAPIDAPI_INSTAGRAM_HOST_ALT",
+                    "instagram-downloader-download-instagram-stories-videos4.p.rapidapi.com",
+                ),
+                "/index",
+            ),
+            (
+                os.getenv("RAPIDAPI_INSTAGRAM_REELS_HOST", "instagram-reels-downloader6.p.rapidapi.com"),
+                "/index",
+            ),
+        ]
+
+        for host, path in endpoints:
+            if not host:
+                continue
+            api_url = f"https://{host}{path}"
+            headers = {
+                "User-Agent": self._get_user_agent(),
+                "X-RapidAPI-Key": api_key,
+                "X-RapidAPI-Host": host,
+            }
+            try:
+                response = await asyncio.to_thread(
+                    requests.get, api_url, headers=headers, params={"url": url}, timeout=25
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[RapidAPI] {host} error: {e}")
+                continue
+
+            if response.status_code != 200:
+                logger.debug(f"[RapidAPI] {host} status {response.status_code}")
+                continue
+
+            try:
+                data = response.json()
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[RapidAPI] {host} invalid JSON: {e}")
+                continue
+
+            # Common response shapes
+            video_url = (
+                data.get("download_url")
+                or data.get("download_link")
+                or data.get("link")
+                or data.get("media")
+                or (data.get("result") or {}).get("link")
+            )
+            if not video_url and isinstance(data.get("links"), list):
+                video_url = next((item for item in data["links"] if isinstance(item, str)), None)
+            if not video_url and isinstance(data.get("medias"), list):
+                for media in data["medias"]:
+                    if isinstance(media, dict) and media.get("url"):
+                        video_url = media["url"]
+                        break
+
+            if video_url:
+                logger.info(f"[Instagram API] RapidAPI success via {host}")
+                return InstagramResult(success=True, video_url=video_url, is_video=True)
+
+        return InstagramResult(success=False, error="RapidAPI hosts failed")
 
     async def _try_igram(self, url: str) -> InstagramResult:
         """Try igram.world API"""
@@ -82,10 +250,15 @@ class InstagramAPIService:
             payload = {"url": url}
             
             response = await asyncio.to_thread(
-                requests.post, api_url, json=payload, headers=headers, timeout=20
+                self._request_with_fallbacks,
+                "POST",
+                api_url,
+                headers=headers,
+                json_data=payload,
+                timeout=20,
             )
             
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 items = data.get('items', [])
                 
@@ -119,11 +292,15 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, dd_url, headers=headers, timeout=15, allow_redirects=True
+                self._request_with_fallbacks,
+                "GET",
+                dd_url,
+                headers=headers,
+                timeout=15,
             )
             
-            if response.status_code == 200:
-                html = response.text
+            if response and response.status_code == 200:
+                html = response.text or ""
                 
                 # Find video URL
                 video_match = re.search(r'<source[^>]+src="([^"]+\.mp4[^"]*)"', html)
@@ -212,10 +389,14 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, graphql_url, headers=headers, timeout=15
+                self._request_with_fallbacks,
+                "GET",
+                graphql_url,
+                headers=headers,
+                timeout=15,
             )
             
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 media = data.get('data', {}).get('shortcode_media', {})
                 
@@ -256,10 +437,14 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, api_url, headers=headers, timeout=15
+                self._request_with_fallbacks,
+                "GET",
+                api_url,
+                headers=headers,
+                timeout=15,
             )
             
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 items = data.get('items', [])
                 
@@ -297,10 +482,14 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, oembed_url, headers=headers, timeout=10
+                self._request_with_fallbacks,
+                "GET",
+                oembed_url,
+                headers=headers,
+                timeout=10,
             )
             
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 thumbnail = data.get('thumbnail_url')
                 
@@ -336,11 +525,15 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, post_url, headers=headers, timeout=15
+                self._request_with_fallbacks,
+                "GET",
+                post_url,
+                headers=headers,
+                timeout=15,
             )
             
-            if response.status_code == 200:
-                html = response.text
+            if response and response.status_code == 200:
+                html = response.text or ""
                 
                 # Try to find video URL in page source
                 video_patterns = [
@@ -427,19 +620,24 @@ class InstagramAPIService:
 
     async def get_video_url(self, url: str) -> InstagramResult:
         """Try all services to get video URL"""
+
+        # 0. Premium RapidAPI scrapers (when key present)
+        logger.info("[Instagram API] Trying RapidAPI scrapers...")
+        result = await self._try_rapidapi(url)
+        if result.success:
+            return result
+
+        # 1. Try instaloader (no-login, with optional proxy)
+        logger.info("[Instagram API] Trying instaloader...")
+        result = await self._try_instaloader(url)
+        if result.success:
+            return result
         
-        # 1. Try igram.world first (often works well)
+        # 2. Try igram.world
         logger.info("[Instagram API] Trying igram.world...")
         result = await self._try_igram(url)
         if result.success:
             logger.info("[Instagram API] Success with igram")
-            return result
-        
-        # 2. Try ddinstagram proxy
-        logger.info("[Instagram API] Trying ddinstagram...")
-        result = await self._try_ddinstagram(url)
-        if result.success:
-            logger.info("[Instagram API] Success with ddinstagram")
             return result
         
         # 3. Try GraphQL API
@@ -467,21 +665,28 @@ class InstagramAPIService:
                 logger.info(f"[Instagram API] Success with {name}")
                 return result
         
-        # 6. Try direct post page scraping
+        # 6. Try ddinstagram proxy (often flaky)
+        logger.info("[Instagram API] Trying ddinstagram...")
+        result = await self._try_ddinstagram(url)
+        if result.success:
+            logger.info("[Instagram API] Success with ddinstagram")
+            return result
+        
+        # 7. Try direct post page scraping
         logger.info("[Instagram API] Trying post page scraping...")
         result = await self._try_instagram_post_page(url)
         if result.success:
             logger.info("[Instagram API] Success with post page")
             return result
         
-        # 7. Try embed scraping
+        # 8. Try embed scraping
         logger.info("[Instagram API] Trying embed scraping...")
         result = await self._try_rapi_style(url)
         if result.success:
             logger.info("[Instagram API] Success with embed")
             return result
         
-        # 8. Try oEmbed as last resort (at least get image)
+        # 9. Try oEmbed as last resort (at least get image)
         logger.info("[Instagram API] Trying oEmbed...")
         result = await self._try_instagram_oembed(url)
         if result.success:
@@ -522,16 +727,27 @@ class InstagramAPIService:
                 'Referer': 'https://www.instagram.com/',
             }
             
-            response = await asyncio.to_thread(
-                requests.get, 
-                media_url, 
-                headers=headers, 
-                timeout=120,
-                stream=True
-            )
+            def fetch_media():
+                proxies = []
+                prox = self._get_proxy()
+                if prox:
+                    proxies.append(prox)
+                proxies.append(None)
+                for p in proxies:
+                    try:
+                        r = requests.get(media_url, headers=headers, timeout=120, stream=True, proxies=p)
+                        if r.status_code == 200:
+                            return r
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug(f"[Instagram API] media download failed with proxy {p}: {e}")
+                return None
+
+            response = await asyncio.to_thread(fetch_media)
             
-            if response.status_code != 200:
-                logger.error(f"[Instagram API] Download failed: HTTP {response.status_code}")
+            if not response or response.status_code != 200:
+                logger.error(
+                    f"[Instagram API] Download failed: HTTP {response.status_code if response else 'no response'}"
+                )
                 return None, None
             
             # Generate filename

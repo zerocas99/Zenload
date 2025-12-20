@@ -9,6 +9,7 @@ import yt_dlp
 
 from .base import BaseDownloader, DownloadError
 from ..config import DOWNLOADS_DIR
+from ..utils.proxy_provider import proxy_provider
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,37 @@ class YandexMusicDownloader(BaseDownloader):
                 self.client = None
         except ImportError:
             logger.warning("yandex_music library not installed, will use YouTube fallback")
+
+    def _ru_request(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
+        """Request helper that rotates RU proxies to avoid 451."""
+        proxies_to_try = []
+
+        manual_proxy = os.getenv("YANDEX_PROXY")
+        if manual_proxy:
+            if not manual_proxy.startswith("http"):
+                manual_proxy = f"http://{manual_proxy}"
+            proxies_to_try.append({"http": manual_proxy, "https": manual_proxy})
+
+        allow_public = os.getenv("YANDEX_USE_PUBLIC_PROXIES", "1") not in ("0", "false", "False")
+        if allow_public:
+            prox = proxy_provider.get_proxy(country="ru")
+            if prox:
+                proxies_to_try.append(prox)
+
+        proxies_to_try.append(None)  # final direct attempt
+
+        last_response: Optional[requests.Response] = None
+        for prox in proxies_to_try:
+            try:
+                resp = requests.request(method, url, proxies=prox, **kwargs)
+                last_response = resp
+                # Accept anything except hard geo block codes
+                if resp.status_code not in (451, 403):
+                    return resp
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[Yandex] request failed via proxy {prox}: {e}")
+                continue
+        return last_response
 
     def platform_id(self) -> str:
         return "yandex_music"
@@ -77,10 +109,10 @@ class YandexMusicDownloader(BaseDownloader):
             }
             
             response = await asyncio.to_thread(
-                requests.get, oembed_url, headers=headers, timeout=10
+                self._ru_request, "GET", oembed_url, headers=headers, timeout=10
             )
             
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 title = data.get('title', '')
                 author = data.get('author_name', '')
@@ -113,10 +145,10 @@ class YandexMusicDownloader(BaseDownloader):
             api_url = f"https://api.music.yandex.net/tracks/{track_id}"
             
             response = await asyncio.to_thread(
-                requests.get, api_url, headers=headers, timeout=10
+                self._ru_request, "GET", api_url, headers=headers, timeout=10
             )
             
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 if data.get('result') and len(data['result']) > 0:
                     track = data['result'][0]
@@ -200,10 +232,11 @@ class YandexMusicDownloader(BaseDownloader):
                 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
             }
             
-            response = await asyncio.to_thread(requests.get, url, headers=headers, timeout=15)
+            response = await asyncio.to_thread(self._ru_request, "GET", url, headers=headers, timeout=15)
             
-            if response.status_code != 200:
-                logger.info(f"[Yandex] Page request failed: {response.status_code}")
+            if not response or response.status_code != 200:
+                status = response.status_code if response else "no response"
+                logger.info(f"[Yandex] Page request failed: {status}")
                 return None
             
             html = response.text
@@ -424,7 +457,9 @@ class YandexMusicDownloader(BaseDownloader):
                     search_query = f"{artists} - {track_info['title']}"
             
             if not search_query:
-                raise DownloadError("Яндекс Музыка недоступна из-за гео-ограничений. Скопируйте название трека и отправьте как текст для поиска на YouTube.")
+                raise DownloadError(
+                    "Unable to build a search query from Yandex Music metadata; try another link or configure a RU proxy."
+                )
 
             # Download from YouTube
             self.update_progress('status_downloading', 30)
@@ -435,13 +470,13 @@ class YandexMusicDownloader(BaseDownloader):
                 self.update_progress('status_downloading', 100)
                 return metadata, file_path
 
-            raise DownloadError("Не удалось скачать трек. YouTube fallback не нашёл трек.")
+            raise DownloadError("Unable to download the track via YouTube fallback.")
 
         except DownloadError:
             raise
         except Exception as e:
             logger.error(f"[Yandex] Error downloading: {str(e)}", exc_info=True)
-            raise DownloadError(f"Ошибка загрузки: {str(e)}")
+            raise DownloadError(f"Download failed: {str(e)}")
 
     def _progress_hook(self, d: Dict):
         """Progress hook for yt-dlp"""
@@ -454,4 +489,3 @@ class YandexMusicDownloader(BaseDownloader):
                     self.update_progress('status_downloading', progress)
             except Exception:
                 pass
-
