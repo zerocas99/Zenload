@@ -44,6 +44,20 @@ class InstagramAPIService:
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         ]
+        self._cookies = self._load_cookies()
+    
+    def _load_cookies(self) -> dict:
+        """Load cookies from environment"""
+        import os
+        cookies = {}
+        cookie_str = os.getenv('INSTAGRAM_COOKIES', '')
+        if cookie_str:
+            for cookie in cookie_str.split(';'):
+                cookie = cookie.strip()
+                if '=' in cookie:
+                    name, value = cookie.split('=', 1)
+                    cookies[name.strip()] = value.strip()
+        return cookies
     
     def _get_user_agent(self) -> str:
         return random.choice(self._user_agents)
@@ -132,7 +146,7 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, graphql_url, headers=headers, timeout=15
+                requests.get, graphql_url, headers=headers, cookies=self._cookies, timeout=15
             )
             
             if response.status_code == 200:
@@ -176,7 +190,7 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, api_url, headers=headers, timeout=15
+                requests.get, api_url, headers=headers, cookies=self._cookies, timeout=15
             )
             
             if response.status_code == 200:

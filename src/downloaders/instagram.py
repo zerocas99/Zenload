@@ -1,8 +1,10 @@
 """Instagram downloader using Cobalt API with alternative services and yt-dlp fallback"""
 
+import os
 import re
 import logging
 import asyncio
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 import yt_dlp
@@ -19,12 +21,46 @@ class InstagramDownloader(BaseDownloader):
     
     def __init__(self):
         super().__init__()
+        self._cookies_file = None
+        self._setup_cookies()
         self.ydl_opts.update({
             'format': 'best',
             'nooverwrites': True,
             'quiet': True,
             'no_warnings': True,
         })
+        if self._cookies_file:
+            self.ydl_opts['cookiefile'] = self._cookies_file
+
+    def _setup_cookies(self):
+        """Setup cookies from environment variable"""
+        cookies = os.getenv('INSTAGRAM_COOKIES')
+        if cookies:
+            try:
+                # Create temp file with cookies in Netscape format
+                fd, path = tempfile.mkstemp(suffix='.txt', prefix='ig_cookies_')
+                with os.fdopen(fd, 'w') as f:
+                    # Write Netscape cookie header
+                    f.write("# Netscape HTTP Cookie File\n")
+                    f.write("# https://curl.haxx.se/rfc/cookie_spec.html\n\n")
+                    
+                    # Parse cookies - expect format: name1=value1; name2=value2
+                    for cookie in cookies.split(';'):
+                        cookie = cookie.strip()
+                        if '=' in cookie:
+                            name, value = cookie.split('=', 1)
+                            name = name.strip()
+                            value = value.strip()
+                            # Write in Netscape format
+                            f.write(f".instagram.com\tTRUE\t/\tTRUE\t0\t{name}\t{value}\n")
+                
+                self._cookies_file = path
+                logger.info("[Instagram] Cookies loaded from environment")
+            except Exception as e:
+                logger.error(f"[Instagram] Failed to setup cookies: {e}")
+                self._cookies_file = None
+        else:
+            logger.info("[Instagram] No INSTAGRAM_COOKIES env var found")
 
     def _extract_shortcode(self, url: str) -> Optional[str]:
         """Extract shortcode from Instagram URL"""
