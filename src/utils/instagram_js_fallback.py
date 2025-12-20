@@ -55,27 +55,50 @@ class InstagramJSFallback:
                         logger.error(f"[JS Fallback] API returned status {response.status}")
                         return None
                     
-                    data = await response.json()
-                    logger.debug(f"[JS Fallback] API response: {data}")
+                    # Try to parse as JSON
+                    try:
+                        data = await response.json()
+                    except:
+                        # If JSON parsing fails, try to get text
+                        text = await response.text()
+                        logger.error(f"[JS Fallback] Failed to parse JSON: {text[:200]}")
+                        return None
+                    
+                    logger.debug(f"[JS Fallback] API response type: {type(data)}, data: {str(data)[:200]}")
                     
                     # API returns: {'status': True, 'data': [{'url': '...', 'thumbnail': '...'}]}
                     video_url = None
                     
-                    if data.get('status') and data.get('data'):
-                        # data['data'] is a list of media items
-                        media_list = data['data']
-                        if isinstance(media_list, list) and len(media_list) > 0:
-                            video_url = media_list[0].get('url')
+                    if isinstance(data, dict):
+                        if data.get('status') and data.get('data'):
+                            # data['data'] is a list of media items
+                            media_list = data['data']
+                            if isinstance(media_list, list) and len(media_list) > 0:
+                                first_item = media_list[0]
+                                if isinstance(first_item, dict):
+                                    video_url = first_item.get('url')
+                                    logger.debug(f"[JS Fallback] Extracted URL from data[0]: {video_url[:100] if video_url else 'None'}...")
+                        
+                        # Fallback: check if 'url' is directly in response (old format)
+                        if not video_url:
+                            video_url = data.get('url')
+                            if video_url:
+                                logger.debug(f"[JS Fallback] Extracted URL from root: {video_url[:100] if isinstance(video_url, str) else type(video_url)}...")
                     
-                    # Fallback: check if 'url' is directly in response (old format)
+                    # Validate that video_url is actually a URL string
                     if not video_url:
-                        video_url = data.get('url')
-                    
-                    if not video_url:
-                        logger.error(f"[JS Fallback] No video URL in response: {data}")
+                        logger.error(f"[JS Fallback] No video URL in response: {str(data)[:300]}")
                         return None
                     
-                    logger.info("[JS Fallback] Got video URL successfully")
+                    if not isinstance(video_url, str):
+                        logger.error(f"[JS Fallback] video_url is not a string: {type(video_url)}")
+                        return None
+                    
+                    if not video_url.startswith('http'):
+                        logger.error(f"[JS Fallback] video_url doesn't start with http: {video_url[:100]}")
+                        return None
+                    
+                    logger.info(f"[JS Fallback] Got valid video URL: {video_url[:100]}...")
                     return video_url
                     
         except asyncio.TimeoutError:
