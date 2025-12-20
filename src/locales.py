@@ -4,41 +4,39 @@ from typing import Dict, Any
 LOCALES: Dict[str, Dict[str, str]] = {
     'ru': {
         'welcome': (
-            "ZeroLoad\n\n"
-            "Отправьте ссылку на видео или музыку с:\n"
-            "• Instagram\n"
-            "• TikTok\n"
-            "• Pinterest\n"
-            "• Yandex Music\n"
-            "• SoundCloud\n\n"
-            "Команды:\n"
-            "/settings - Настройки\n"
-            "/help - Помощь\n"
-            "/donate - Поддержать"
+            "⚡ ZenLoad\n\n"
+            "Скачивай видео и музыку одной ссылкой\n\n"
+            "📱 Instagram · TikTok · Pinterest\n"
+            "🎵 Yandex Music · SoundCloud\n\n"
+            "Просто отправь ссылку →"
         ),
-        'btn_settings': "Настройки",
-        'btn_help': "Помощь",
-        'btn_language': "Язык",
-        'btn_quality': "Качество",
-        'btn_back': "Назад",
-        'btn_russian': "Русский",
-        'btn_english': "English",
-        'btn_ask': "Спрашивать каждый раз",
-        'btn_best': "Лучшее",
-        'btn_donate': "Поддержать",
+        'btn_settings': "⚙️ Настройки",
+        'btn_help': "❓ Помощь",
+        'btn_language': "🌐 Язык",
+        'btn_quality': "📊 Качество",
+        'btn_back': "← Назад",
+        'btn_russian': "🇷🇺 Русский",
+        'btn_english': "🇺🇸 English",
+        'btn_ask': "🔄 Спрашивать",
+        'btn_best': "⭐ Лучшее",
+        'btn_donate': "💝 Донат",
         'help': (
-            "Как использовать:\n\n"
-            "1. Отправьте ссылку\n"
-            "2. Выберите качество\n"
-            "3. Дождитесь загрузки\n\n"
-            "Настройки:\n"
+            "📖 Как пользоваться\n\n"
+            "1️⃣ Отправь ссылку на видео или музыку\n"
+            "2️⃣ Выбери качество (если нужно)\n"
+            "3️⃣ Получи файл\n\n"
+            "⚙️ Настройки\n"
             "• Язык интерфейса\n"
             "• Качество по умолчанию\n\n"
-            "Примечание: Контент должен быть публичным"
+            "💡 Совет: контент должен быть публичным\n\n"
+            "🔧 Технологии\n"
+            "Бот использует несколько методов загрузки.\n"
+            "Если основной не сработал — автоматически\n"
+            "переключается на резервный (JS API)."
         ),
         'unsupported_url': (
-            "Неподдерживаемая ссылка\n\n"
-            "Поддерживаются:\n"
+            "❌ Ссылка не поддерживается\n\n"
+            "✅ Поддерживаются:\n"
             "• Instagram\n"
             "• TikTok\n"
             "• Pinterest\n"
@@ -46,115 +44,110 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "• SoundCloud"
         ),
         'settings_menu': (
-            "Настройки\n\n"
-            "Язык: {language}\n"
-            "Качество: {quality}"
+            "⚙️ Настройки\n\n"
+            "🌐 Язык: {language}\n"
+            "📊 Качество: {quality}"
         ),
-        'processing': "Обработка...",
-        'select_quality': "Выберите качество:",
-        'best_quality': "Лучшее",
-        'quality_format': "{quality} ({ext})",
-        'select_language': "Выберите язык:",
-        'select_default_quality': "Качество по умолчанию:",
-        'ask_every_time': "Спрашивать",
-        'best_available': "Лучшее",
-        'downloading': "Загрузка...",
-        'session_expired': "Сессия истекла. Отправьте ссылку заново.",
-        'invalid_url': "Неверная ссылка",
-        'error_occurred': "Произошла ошибка при обработке запроса",
+        'processing': "⏳ Обработка...",
+        'select_quality': "📊 Выбери качество:",
+        'best_quality': "⭐ Лучшее",
+        'quality_format': "📹 {quality} ({ext})",
+        'select_language': "🌐 Выбери язык:",
+        'select_default_quality': "📊 Качество по умолчанию:",
+        'ask_every_time': "🔄 Спрашивать",
+        'best_available': "⭐ Лучшее",
+        'downloading': "📥 Загрузка...",
+        'session_expired': "⏰ Сессия истекла. Отправь ссылку заново.",
+        'invalid_url': "❌ Неверная ссылка",
+        'error_occurred': "❌ Ошибка при обработке запроса",
         'download_failed': (
-            "Ошибка загрузки: {error}\n\n"
-            "Возможные причины:\n"
+            "❌ Ошибка загрузки\n\n"
+            "{error}\n\n"
+            "💡 Возможные причины:\n"
             "• Приватный аккаунт\n"
-            "• Требуется авторизация\n"
-            "• Контент удален\n"
-            "• Неверная ссылка"
+            "• Контент удалён\n"
+            "• Временная ошибка сервиса"
         ),
         'story_auth_required': (
-            "Instagram Stories требуют авторизации.\n"
-            "Попробуйте скачать Reels или публичные посты."
+            "🔒 Stories требуют авторизации\n\n"
+            "💡 Попробуй скачать Reels или посты"
         ),
         'auth_required': (
-            "Требуется авторизация\n\n"
-            "Возможные причины:\n"
+            "🔒 Требуется авторизация\n\n"
+            "💡 Возможные причины:\n"
             "• Приватный аккаунт\n"
-            "• Неверная ссылка\n"
-            "• Временная ошибка"
+            "• Контент недоступен"
         ),
         'donate': (
-            "Поддержите разработку бота!\n\n"
-            "Выберите сумму поддержки в Stars"
+            "💝 Поддержи разработку\n\n"
+            "Выбери сумму в Telegram Stars"
         ),
-        'invoice_title': "Поддержать ZeroLoad Bot",
-        'invoice_description': "Поддержите разработку бота Stars",
-        'price_label': "Поддержка (100 Stars)",
-        'payment_support': (
-            "По вопросам оплаты обращайтесь к @binarybliss"
-        ),
-        'payment_success': "Спасибо за вашу поддержку!",
+        'invoice_title': "Поддержать ZenLoad",
+        'invoice_description': "Спасибо за поддержку!",
+        'price_label': "💝 100 Stars",
+        'payment_support': "По вопросам оплаты: @binarybliss",
+        'payment_success': "💝 Спасибо за поддержку!",
         'group_welcome': (
-            "Привет! Отправьте ссылку на видео или музыку для скачивания.\n"
-            "Поддерживаются: Instagram, TikTok, Pinterest, Yandex Music, SoundCloud"
+            "⚡ ZenLoad готов к работе\n\n"
+            "Отправляйте ссылки — бот скачает автоматически"
         ),
         'group_welcome_admin': (
-            "Привет! Бот готов к работе.\n"
-            "Отправьте ссылку на видео или музыку для скачивания.\n"
-            "Поддерживаются: Instagram, TikTok, Pinterest, Yandex Music, SoundCloud\n\n"
-            "Настройки группы: /settings"
+            "⚡ ZenLoad активирован\n\n"
+            "Отправляйте ссылки — бот скачает автоматически\n\n"
+            "⚙️ Настройки группы: /settings"
         ),
-        'missing_url': "Пожалуйста, укажите ссылку после команды /zen",
+        'missing_url': "❌ Укажи ссылку после /zen",
         # Status messages
-        'status_getting_info': "Получение информации... ({progress}%)",
-        'status_downloading': "Загрузка... ({progress}%)",
-        'status_processing': "Обработка... ({progress}%)",
-        'status_sending': "Отправка файла... ({progress}%)",
-        'admin_only': "Только администраторы могут изменять настройки группы",
-        'group_settings_menu': "Настройки группы\n\nЯзык: {language}\nКачество: {quality}",
-        'settings_unchanged': "Настройки не изменились",
+        'status_getting_info': "🔍 Получение информации... {progress}%",
+        'status_downloading': "📥 Загрузка... {progress}%",
+        'status_processing': "⚙️ Обработка... {progress}%",
+        'status_sending': "📤 Отправка... {progress}%",
+        'status_fallback': "🔄 Пробую альтернативный метод...",
+        'admin_only': "⛔ Только для администраторов",
+        'group_settings_menu': "⚙️ Настройки группы\n\n🌐 Язык: {language}\n📊 Качество: {quality}",
+        'settings_unchanged': "✓ Настройки сохранены",
         # Rate limit and concurrent download messages
         'error_too_many_downloads': (
-            "Слишком много одновременных загрузок.\n"
-            "Пожалуйста, подождите завершения текущих загрузок или попробуйте позже."
+            "⏳ Слишком много загрузок\n\n"
+            "Подожди завершения текущих"
         ),
-        'error_rate_limit': "Слишком много запросов. Пожалуйста, подождите несколько секунд."
+        'error_rate_limit': "⏳ Подожди несколько секунд..."
     },
     'en': {
         'welcome': (
-            "ZeroLoad\n\n"
-            "Send video or music URL from:\n"
-            "• Instagram\n"
-            "• TikTok\n"
-            "• Pinterest\n"
-            "• Yandex Music\n"
-            "• SoundCloud\n\n"
-            "Commands:\n"
-            "/settings - Settings\n"
-            "/help - Help\n"
-            "/donate - Support"
+            "⚡ ZenLoad\n\n"
+            "Download videos & music with one link\n\n"
+            "📱 Instagram · TikTok · Pinterest\n"
+            "🎵 Yandex Music · SoundCloud\n\n"
+            "Just send a link →"
         ),
-        'btn_settings': "Settings",
-        'btn_help': "Help",
-        'btn_language': "Language",
-        'btn_quality': "Quality",
-        'btn_back': "Back",
-        'btn_russian': "Russian",
-        'btn_english': "English",
-        'btn_ask': "Ask",
-        'btn_best': "Best",
-        'btn_donate': "Support",
+        'btn_settings': "⚙️ Settings",
+        'btn_help': "❓ Help",
+        'btn_language': "🌐 Language",
+        'btn_quality': "📊 Quality",
+        'btn_back': "← Back",
+        'btn_russian': "🇷🇺 Русский",
+        'btn_english': "🇺🇸 English",
+        'btn_ask': "🔄 Ask",
+        'btn_best': "⭐ Best",
+        'btn_donate': "💝 Donate",
         'help': (
-            "How to use:\n\n"
-            "1. Send URL\n"
-            "2. Select quality\n"
-            "3. Wait for download\n\n"
-            "Settings:\n"
+            "📖 How to use\n\n"
+            "1️⃣ Send a video or music link\n"
+            "2️⃣ Choose quality (if needed)\n"
+            "3️⃣ Get your file\n\n"
+            "⚙️ Settings\n"
             "• Interface language\n"
             "• Default quality\n\n"
-            "Note: Content must be public"
+            "💡 Tip: content must be public\n\n"
+            "🔧 Technology\n"
+            "Bot uses multiple download methods.\n"
+            "If primary fails — automatically switches\n"
+            "to backup method (JS API)."
         ),
         'unsupported_url': (
-            "Unsupported URL\n\n"
-            "Supported:\n"
+            "❌ Unsupported link\n\n"
+            "✅ Supported:\n"
             "• Instagram\n"
             "• TikTok\n"
             "• Pinterest\n"
@@ -162,88 +155,74 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "• SoundCloud"
         ),
         'settings_menu': (
-            "Settings\n\n"
-            "Language: {language}\n"
-            "Quality: {quality}"
+            "⚙️ Settings\n\n"
+            "🌐 Language: {language}\n"
+            "📊 Quality: {quality}"
         ),
-        'processing': "Processing...",
-        'select_quality': "Select quality:",
-        'best_quality': "Best",
-        'quality_format': "{quality} ({ext})",
-        'select_language': "Select language:",
-        'select_default_quality': "Default quality:",
-        'ask_every_time': "Ask every time",
-        'best_available': "Best",
-        'downloading': "Downloading...",
-        'session_expired': "Session expired. Send URL again.",
-        'invalid_url': "Invalid URL",
-        'error_occurred': "Error processing request",
+        'processing': "⏳ Processing...",
+        'select_quality': "📊 Select quality:",
+        'best_quality': "⭐ Best",
+        'quality_format': "📹 {quality} ({ext})",
+        'select_language': "🌐 Select language:",
+        'select_default_quality': "📊 Default quality:",
+        'ask_every_time': "🔄 Ask",
+        'best_available': "⭐ Best",
+        'downloading': "📥 Downloading...",
+        'session_expired': "⏰ Session expired. Send link again.",
+        'invalid_url': "❌ Invalid link",
+        'error_occurred': "❌ Error processing request",
         'download_failed': (
-            "Download failed: {error}\n\n"
-            "Possible reasons:\n"
+            "❌ Download failed\n\n"
+            "{error}\n\n"
+            "💡 Possible reasons:\n"
             "• Private account\n"
-            "• Authentication required\n"
             "• Content deleted\n"
-            "• Invalid URL"
+            "• Temporary service error"
         ),
         'story_auth_required': (
-            "Instagram Stories require authentication.\n"
-            "Try downloading Reels or public posts instead."
+            "🔒 Stories require authentication\n\n"
+            "💡 Try downloading Reels or posts"
         ),
         'auth_required': (
-            "Authentication required\n\n"
-            "Possible reasons:\n"
+            "🔒 Authentication required\n\n"
+            "💡 Possible reasons:\n"
             "• Private account\n"
-            "• Invalid URL\n"
-            "• Temporary error"
+            "• Content unavailable"
         ),
         'donate': (
-            "Support bot development!\n\n"
-            "Choose support amount in Stars"
+            "💝 Support development\n\n"
+            "Choose amount in Telegram Stars"
         ),
-        'invoice_title': "Support ZeroLoad Bot",
-        'invoice_description': "Support bot development with Stars",
-        'price_label': "Support (100 Stars)",
-        'payment_support': (
-            "For payment support, please contact @binarybliss"
-        ),
-        'payment_success': "Thank you for your support!",
+        'invoice_title': "Support ZenLoad",
+        'invoice_description': "Thank you for your support!",
+        'price_label': "💝 100 Stars",
+        'payment_support': "Payment support: @binarybliss",
+        'payment_success': "💝 Thank you for your support!",
         'group_welcome': (
-            "Hi! Just send a link to the chat to download videos or music.\n\n"
-            "Supported:\n"
-            "• Instagram\n"
-            "• TikTok\n"
-            "• Pinterest\n"
-            "• Yandex Music\n"
-            "• SoundCloud"
+            "⚡ ZenLoad is ready\n\n"
+            "Send links — bot will download automatically"
         ),
         'group_welcome_admin': (
-            "Hi! Bot is ready.\n\n"
-            "Just send links to the chat - the bot will automatically download videos or music.\n\n"
-            "Supported:\n"
-            "• Instagram\n"
-            "• TikTok\n"
-            "• Pinterest\n"
-            "• Yandex Music\n"
-            "• SoundCloud\n\n"
-            "Commands:\n"
-            "/settings - Group settings"
+            "⚡ ZenLoad activated\n\n"
+            "Send links — bot will download automatically\n\n"
+            "⚙️ Group settings: /settings"
         ),
-        'missing_url': "Please provide a URL after the /zen command",
+        'missing_url': "❌ Provide a link after /zen",
         # Status messages
-        'status_getting_info': "Getting information... ({progress}%)",
-        'status_downloading': "Downloading... ({progress}%)",
-        'status_processing': "Processing... ({progress}%)",
-        'status_sending': "Sending file... ({progress}%)",
-        'admin_only': "Only administrators can modify group settings",
-        'group_settings_menu': "Group Settings\n\nLanguage: {language}\nQuality: {quality}",
-        'settings_unchanged': "Settings remain unchanged",
+        'status_getting_info': "🔍 Getting info... {progress}%",
+        'status_downloading': "📥 Downloading... {progress}%",
+        'status_processing': "⚙️ Processing... {progress}%",
+        'status_sending': "📤 Sending... {progress}%",
+        'status_fallback': "🔄 Trying alternative method...",
+        'admin_only': "⛔ Admins only",
+        'group_settings_menu': "⚙️ Group Settings\n\n🌐 Language: {language}\n📊 Quality: {quality}",
+        'settings_unchanged': "✓ Settings saved",
         # Rate limit and concurrent download messages
         'error_too_many_downloads': (
-            "Too many concurrent downloads.\n"
-            "Please wait for current downloads to complete or try again later."
+            "⏳ Too many downloads\n\n"
+            "Wait for current ones to finish"
         ),
-        'error_rate_limit': "Too many requests. Please wait a few seconds."
+        'error_rate_limit': "⏳ Wait a few seconds..."
     }
 }
 
