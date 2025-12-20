@@ -259,6 +259,20 @@ class DownloadWorker:
                         is_photo = False
                         all_images = None
                     
+                    # Add dev credit to metadata for direct URL sends
+                    if direct_url:
+                        settings = self.settings_manager.get_settings(user_id)
+                        lang = settings.language
+                        if lang == 'ru':
+                            dev_credit = "\n\n📥 Скачано через @ZenLoad_Bot\n👨‍💻 Разработчик: @zerob1ade"
+                        else:
+                            dev_credit = "\n\n📥 Downloaded via @ZenLoad_Bot\n👨‍💻 Dev: @zerob1ade"
+                        
+                        if metadata:
+                            metadata = metadata + dev_credit
+                        else:
+                            metadata = dev_credit.strip()
+                    
                     if direct_url:
                         logger.info(f"Got direct URL, trying fast send... (photo={is_photo}, images={len(all_images) if all_images else 0})")
                         
@@ -290,6 +304,19 @@ class DownloadWorker:
             result = await downloader.download(url, format_id)
             metadata, file_path = result
             logger.info(f"Download completed. File path: {file_path}")
+            
+            # Add dev credit to metadata
+            settings = self.settings_manager.get_settings(user_id)
+            lang = settings.language
+            if lang == 'ru':
+                dev_credit = "\n\n📥 Скачано через @ZenLoad_Bot\n👨‍💻 Разработчик: @zerob1ade"
+            else:
+                dev_credit = "\n\n📥 Downloaded via @ZenLoad_Bot\n👨‍💻 Dev: @zerob1ade"
+            
+            if metadata:
+                metadata = metadata + dev_credit
+            else:
+                metadata = dev_credit.strip()
             
             # Sending phase
             await self.update_status(status_message, user_id, 'status_sending', 0)
