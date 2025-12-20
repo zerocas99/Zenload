@@ -93,10 +93,14 @@ LOCALES: Dict[str, Dict[str, str]] = {
         ),
         'payment_success': "Спасибо за вашу поддержку!",
         'group_welcome': (
-            "Привет! Используйте команду /zen с ссылкой для загрузки видео или музыки.\n"
-            "Примеры:\n"
-            "• /zen https://www.instagram.com/p/...\n"
-            "• /zen https://music.yandex.ru/album/123/track/456"
+            "Привет! Отправьте ссылку на видео или музыку для скачивания.\n"
+            "Поддерживаются: Instagram, TikTok, Pinterest, Yandex Music, SoundCloud"
+        ),
+        'group_welcome_admin': (
+            "Привет! Бот готов к работе.\n"
+            "Отправьте ссылку на видео или музыку для скачивания.\n"
+            "Поддерживаются: Instagram, TikTok, Pinterest, Yandex Music, SoundCloud\n\n"
+            "Настройки группы: /settings"
         ),
         'missing_url': "Пожалуйста, укажите ссылку после команды /zen",
         # Status messages
@@ -205,10 +209,25 @@ LOCALES: Dict[str, Dict[str, str]] = {
         ),
         'payment_success': "Thank you for your support!",
         'group_welcome': (
-            "Hi! Use the /zen command with a URL to download videos or music.\n"
-            "Examples:\n"
-            "• /zen https://www.instagram.com/p/...\n"
-            "• /zen https://music.yandex.ru/album/123/track/456"
+            "Hi! Just send a link to the chat to download videos or music.\n\n"
+            "Supported:\n"
+            "• Instagram\n"
+            "• TikTok\n"
+            "• Pinterest\n"
+            "• Yandex Music\n"
+            "• SoundCloud"
+        ),
+        'group_welcome_admin': (
+            "Hi! Bot is ready.\n\n"
+            "Just send links to the chat - the bot will automatically download videos or music.\n\n"
+            "Supported:\n"
+            "• Instagram\n"
+            "• TikTok\n"
+            "• Pinterest\n"
+            "• Yandex Music\n"
+            "• SoundCloud\n\n"
+            "Commands:\n"
+            "/settings - Group settings"
         ),
         'missing_url': "Please provide a URL after the /zen command",
         # Status messages

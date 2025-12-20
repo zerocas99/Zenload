@@ -1,6 +1,7 @@
 """
 Instagram JS API Fallback Service
 Used when Cobalt fails or times out
+Uses local Node.js service from Instagram-Video-Downloader-API
 """
 
 import asyncio
@@ -13,14 +14,14 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-# Configuration
+# Configuration - Node.js service must be running on this port
 JS_API_BASE_URL = "http://localhost:3000"
-JS_API_TIMEOUT = 45  # seconds
+JS_API_TIMEOUT = 60  # seconds for API request
 DOWNLOAD_TIMEOUT = 120  # seconds for downloading the actual video
 
 
 class InstagramJSFallback:
-    """Fallback service using Node.js Instagram API"""
+    """Fallback service using Node.js Instagram API (snapsave-based)"""
     
     def __init__(self):
         self._user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -39,8 +40,10 @@ class InstagramJSFallback:
             return None
         
         try:
-            api_url = f"{JS_API_BASE_URL}/igdl?url={quote(url, safe='')}"
-            logger.info(f"[JS Fallback] Requesting: {api_url}")
+            # URL encode the instagram URL
+            encoded_url = quote(url, safe='')
+            api_url = f"{JS_API_BASE_URL}/igdl?url={encoded_url}"
+            logger.info(f"[JS Fallback] Requesting Node.js API...")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -63,6 +66,9 @@ class InstagramJSFallback:
                     
         except asyncio.TimeoutError:
             logger.error(f"[JS Fallback] API timeout after {JS_API_TIMEOUT}s")
+            return None
+        except aiohttp.ClientConnectorError:
+            logger.error("[JS Fallback] Cannot connect to Node.js service. Is it running on port 3000?")
             return None
         except aiohttp.ClientError as e:
             logger.error(f"[JS Fallback] HTTP error: {e}")
