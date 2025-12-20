@@ -123,9 +123,9 @@ class ZenloadBot:
             self.message_handlers.handle_message
         ))
         
-        # Message handlers for group chats (with bot mention)
+        # Message handlers for group chats (react to all messages with URLs)
         self.application.add_handler(MessageHandler(
-            (filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS & filters.Entity("mention")),
+            (filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS),
             self.message_handlers.handle_message
         ))
         

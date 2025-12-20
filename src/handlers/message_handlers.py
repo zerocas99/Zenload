@@ -47,35 +47,23 @@ class MessageHandlers:
 
         message_text = message.text or ''
 
-        # Handle group chat messages with bot mention
+        # Handle group chat messages
         if update.effective_chat.type in [Chat.GROUP, Chat.SUPERGROUP]:
-            # Check if our bot is actually mentioned
-            bot_username = context.bot.username
-            if not bot_username or f"@{bot_username}" not in message_text:
-                # Not our bot being mentioned
-                return
-                
             # Try to find URL in the message text first
             url = self._extract_url(message_text)
             
             # If no URL found and it's a reply, check the replied message
             if not url and message.reply_to_message:
-                replied_text = message.reply_to_message.text
+                replied_text = message.reply_to_message.text or ''
                 url = self._extract_url(replied_text)
             
-            # Process the URL if found
+            # Process the URL if found (no mention required)
             if url:
-                asyncio.create_task(self._process_url(url, update, context))
-            else:
-                # Try to send message without reply if we don't have admin rights
-                try:
-                    await message.reply_text(
-                        self.get_message(user_id, 'unsupported_url')
-                    )
-                except Exception:
-                    await update.effective_chat.send_message(
-                        self.get_message(user_id, 'unsupported_url')
-                    )
+                # Check if URL is from supported platforms
+                downloader = DownloaderFactory.get_downloader(url)
+                if downloader:
+                    asyncio.create_task(self._process_url(url, update, context))
+            # Don't respond to non-URL messages in groups (to avoid spam)
             return
 
         # Handle private chat messages (we already returned for non-private above)

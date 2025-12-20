@@ -4,7 +4,7 @@ from typing import Dict, Any
 LOCALES: Dict[str, Dict[str, str]] = {
     'ru': {
         'welcome': (
-            "Zenload\n\n"
+            "ZeroLoad\n\n"
             "Отправьте ссылку на видео или музыку с:\n"
             "• Instagram\n"
             "• TikTok\n"
@@ -70,6 +70,10 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "• Контент удален\n"
             "• Неверная ссылка"
         ),
+        'story_auth_required': (
+            "Instagram Stories требуют авторизации.\n"
+            "Попробуйте скачать Reels или публичные посты."
+        ),
         'auth_required': (
             "Требуется авторизация\n\n"
             "Возможные причины:\n"
@@ -81,7 +85,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "Поддержите разработку бота!\n\n"
             "Выберите сумму поддержки в Stars"
         ),
-        'invoice_title': "Поддержать Zenload Bot",
+        'invoice_title': "Поддержать ZeroLoad Bot",
         'invoice_description': "Поддержите разработку бота Stars",
         'price_label': "Поддержка (100 Stars)",
         'payment_support': (
@@ -112,7 +116,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
     },
     'en': {
         'welcome': (
-            "Zenload\n\n"
+            "ZeroLoad\n\n"
             "Send video or music URL from:\n"
             "• Instagram\n"
             "• TikTok\n"
@@ -178,6 +182,10 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "• Content deleted\n"
             "• Invalid URL"
         ),
+        'story_auth_required': (
+            "Instagram Stories require authentication.\n"
+            "Try downloading Reels or public posts instead."
+        ),
         'auth_required': (
             "Authentication required\n\n"
             "Possible reasons:\n"
@@ -189,7 +197,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "Support bot development!\n\n"
             "Choose support amount in Stars"
         ),
-        'invoice_title': "Support Zenload Bot",
+        'invoice_title': "Support ZeroLoad Bot",
         'invoice_description': "Support bot development with Stars",
         'price_label': "Support (100 Stars)",
         'payment_support': (

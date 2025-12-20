@@ -119,11 +119,23 @@ class InstagramAPIService:
             r'instagram\.com/reel/([A-Za-z0-9_-]+)',
             r'instagram\.com/reels/([A-Za-z0-9_-]+)',
             r'instagram\.com/tv/([A-Za-z0-9_-]+)',
+            r'instagram\.com/stories/[^/]+/(\d+)',  # Stories have numeric IDs
         ]
         for pattern in patterns:
             match = re.search(pattern, url)
             if match:
                 return match.group(1)
+        return None
+
+    def _is_story_url(self, url: str) -> bool:
+        """Check if URL is an Instagram Story"""
+        return '/stories/' in url
+
+    def _extract_story_info(self, url: str) -> Optional[Tuple[str, str]]:
+        """Extract username and story ID from story URL"""
+        match = re.search(r'instagram\.com/stories/([^/]+)/(\d+)', url)
+        if match:
+            return match.group(1), match.group(2)
         return None
 
     async def _try_instaloader(self, url: str) -> InstagramResult:
@@ -618,8 +630,86 @@ class InstagramAPIService:
             logger.debug(f"[embed] Error: {e}")
             return InstagramResult(success=False, error=str(e))
 
+    async def _try_story_services(self, url: str) -> InstagramResult:
+        """Try specialized story download services"""
+        story_info = self._extract_story_info(url)
+        if not story_info:
+            return InstagramResult(success=False, error="Invalid story URL")
+        
+        username, story_id = story_info
+        
+        # Try storiesig.info
+        try:
+            api_url = f"https://storiesig.info/api/ig/story?url={url}"
+            headers = {
+                'User-Agent': self._get_user_agent(),
+                'Accept': 'application/json',
+            }
+            
+            response = await asyncio.to_thread(
+                self._request_with_fallbacks,
+                "GET",
+                api_url,
+                headers=headers,
+                timeout=15,
+            )
+            
+            if response and response.status_code == 200:
+                data = response.json()
+                if data.get('result'):
+                    for item in data['result']:
+                        if item.get('video_url'):
+                            return InstagramResult(success=True, video_url=item['video_url'], is_video=True)
+                        elif item.get('image_url'):
+                            return InstagramResult(success=True, image_urls=[item['image_url']], is_video=False)
+        except Exception as e:
+            logger.debug(f"[storiesig] Error: {e}")
+        
+        # Try igstories.app
+        try:
+            api_url = "https://igstories.app/api/stories"
+            headers = {
+                'User-Agent': self._get_user_agent(),
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            }
+            payload = {"username": username}
+            
+            response = await asyncio.to_thread(
+                self._request_with_fallbacks,
+                "POST",
+                api_url,
+                headers=headers,
+                json_data=payload,
+                timeout=15,
+            )
+            
+            if response and response.status_code == 200:
+                data = response.json()
+                stories = data.get('stories', [])
+                for story in stories:
+                    if str(story.get('id')) == story_id or story.get('pk') == story_id:
+                        if story.get('video_url'):
+                            return InstagramResult(success=True, video_url=story['video_url'], is_video=True)
+                        elif story.get('image_url'):
+                            return InstagramResult(success=True, image_urls=[story['image_url']], is_video=False)
+        except Exception as e:
+            logger.debug(f"[igstories] Error: {e}")
+        
+        return InstagramResult(success=False, error="Story services failed")
+
     async def get_video_url(self, url: str) -> InstagramResult:
         """Try all services to get video URL"""
+        
+        is_story = self._is_story_url(url)
+        
+        # For stories, try specialized services first
+        if is_story:
+            logger.info("[Instagram API] Trying story services...")
+            result = await self._try_story_services(url)
+            if result.success:
+                logger.info("[Instagram API] Success with story service")
+                return result
 
         # 0. Premium RapidAPI scrapers (when key present)
         logger.info("[Instagram API] Trying RapidAPI scrapers...")
