@@ -1,4 +1,4 @@
-"""Pinterest downloader - Cobalt primary, yt-dlp fallback"""
+"""Pinterest downloader - Cobalt primary, alternative APIs, yt-dlp fallback"""
 
 import logging
 import asyncio
@@ -7,6 +7,7 @@ from typing import Optional, Tuple, List, Dict
 import yt_dlp
 from .base import BaseDownloader, DownloadError
 from ..utils.cobalt_service import cobalt
+from ..utils.pinterest_api import pinterest_api
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +59,12 @@ class PinterestDownloader(BaseDownloader):
         return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download video - Cobalt first, yt-dlp fallback"""
+        """Download video - Cobalt first, alternative APIs, then yt-dlp fallback"""
         logger.info(f"[Pinterest] Downloading: {url}")
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
         
-        # === Try Cobalt ===
+        # === 1. Try Cobalt ===
         self.update_progress('status_downloading', 10)
         filename, file_path = await cobalt.download(
             url, 
@@ -75,9 +76,23 @@ class PinterestDownloader(BaseDownloader):
             metadata = f"Pinterest\n<a href=\"{url}\">Ссылка</a>"
             return metadata, file_path
         
-        # === Fallback to yt-dlp ===
-        logger.info("[Pinterest] Cobalt failed, trying yt-dlp")
-        self.update_progress('status_downloading', 30)
+        # === 2. Try Alternative Pinterest APIs ===
+        logger.info("[Pinterest] Cobalt failed, trying alternative APIs")
+        self.update_progress('status_downloading', 20)
+        
+        filename, file_path = await pinterest_api.download(
+            url,
+            download_dir,
+            progress_callback=self.update_progress
+        )
+        
+        if file_path and file_path.exists():
+            metadata = f"Pinterest\n<a href=\"{url}\">Ссылка</a>"
+            return metadata, file_path
+        
+        # === 3. Fallback to yt-dlp ===
+        logger.info("[Pinterest] Alternative APIs failed, trying yt-dlp")
+        self.update_progress('status_downloading', 40)
         
         try:
             ydl_opts = {

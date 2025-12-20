@@ -7,6 +7,8 @@ from typing import Optional, Tuple, List, Dict, Any
 import yt_dlp
 from urllib.parse import urlparse, parse_qs
 from .base import BaseDownloader, DownloadError
+from ..utils.cobalt_service import cobalt
+from ..utils.youtube_api import youtube_api
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +122,7 @@ class YouTubeDownloader(BaseDownloader):
                 raise DownloadError(f"Ошибка при получении форматов: {str(e)}")
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download video from URL"""
+        """Download video from URL - Cobalt first, then alternative APIs, then yt-dlp"""
         try:
             self.update_progress('status_downloading', 0)
             processed_url = self.preprocess_url(url)
@@ -129,8 +131,44 @@ class YouTubeDownloader(BaseDownloader):
             # Create download directory if not exists
             download_dir = Path(__file__).parent.parent.parent / "downloads"
             download_dir.mkdir(exist_ok=True)
-            download_dir = download_dir.resolve()  # Get absolute path
-            logger.info(f"[YouTube] Download directory: {download_dir}")
+            download_dir = download_dir.resolve()
+            
+            # === 1. Try Cobalt ===
+            self.update_progress('status_downloading', 5)
+            filename, file_path = await cobalt.download(
+                processed_url, 
+                download_dir,
+                progress_callback=self.update_progress
+            )
+            
+            if file_path and file_path.exists():
+                logger.info("[YouTube] Downloaded via Cobalt")
+                # Get metadata via yt-dlp (quick, no download)
+                try:
+                    with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                        info = await asyncio.to_thread(ydl.extract_info, processed_url, download=False)
+                        return self._prepare_metadata(info, processed_url), file_path
+                except:
+                    return f"YouTube\n<a href=\"{processed_url}\">Ссылка</a>", file_path
+            
+            # === 2. Try Alternative APIs ===
+            logger.info("[YouTube] Cobalt failed, trying alternative APIs")
+            self.update_progress('status_downloading', 15)
+            
+            title, file_path = await youtube_api.download(
+                processed_url,
+                download_dir,
+                quality="1080",
+                progress_callback=self.update_progress
+            )
+            
+            if file_path and file_path.exists():
+                logger.info("[YouTube] Downloaded via alternative API")
+                return f"YouTube\n{title}" if title else f"YouTube\n<a href=\"{processed_url}\">Ссылка</a>", file_path
+            
+            # === 3. Fallback to yt-dlp ===
+            logger.info("[YouTube] Alternative APIs failed, trying yt-dlp")
+            self.update_progress('status_downloading', 20)
 
             ydl_opts = self._get_ydl_opts(format_id)
             ydl_opts.update({
