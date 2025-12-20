@@ -8,7 +8,8 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "Скачивай видео и музыку одной ссылкой\n\n"
             "📱 Instagram · TikTok · Pinterest\n"
             "🎵 Yandex Music · SoundCloud\n\n"
-            "Просто отправь ссылку →"
+            "Просто отправь ссылку →\n\n"
+            "👨‍💻 Dev: @zerob1ade"
         ),
         'btn_settings': "⚙️ Настройки",
         'btn_help': "❓ Помощь",
@@ -103,6 +104,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         'status_processing': "⚙️ Обработка... {progress}%",
         'status_sending': "📤 Отправка... {progress}%",
         'status_fallback': "🔄 Пробую альтернативный метод...",
+        'status_done': "✅ Готово!",
         'admin_only': "⛔ Только для администраторов",
         'group_settings_menu': "⚙️ Настройки группы\n\n🌐 Язык: {language}\n📊 Качество: {quality}",
         'settings_unchanged': "✓ Настройки сохранены",
@@ -119,7 +121,8 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "Download videos & music with one link\n\n"
             "📱 Instagram · TikTok · Pinterest\n"
             "🎵 Yandex Music · SoundCloud\n\n"
-            "Just send a link →"
+            "Just send a link →\n\n"
+            "👨‍💻 Dev: @zerob1ade"
         ),
         'btn_settings': "⚙️ Settings",
         'btn_help': "❓ Help",
@@ -214,6 +217,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         'status_processing': "⚙️ Processing... {progress}%",
         'status_sending': "📤 Sending... {progress}%",
         'status_fallback': "🔄 Trying alternative method...",
+        'status_done': "✅ Done!",
         'admin_only': "⛔ Admins only",
         'group_settings_menu': "⚙️ Group Settings\n\n🌐 Language: {language}\n📊 Quality: {quality}",
         'settings_unchanged': "✓ Settings saved",

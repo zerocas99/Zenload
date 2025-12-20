@@ -34,7 +34,7 @@ class DownloadWorker:
         self._last_progress: Optional[int] = None
         self._status_task: Optional[asyncio.Task] = None
         self._last_update_time = 0
-        self._update_interval = 0.5  # Minimum time between status updates
+        self._update_interval = 0.3  # Faster status updates
 
     def get_message(self, user_id: int, key: str, **kwargs) -> str:
         """Get localized message"""
@@ -109,20 +109,20 @@ class DownloadWorker:
                     audio=direct_url,
                     caption=caption,
                     parse_mode='HTML',
-                    read_timeout=30,
-                    write_timeout=30,
-                    connect_timeout=10,
-                    pool_timeout=10
+                    read_timeout=20,
+                    write_timeout=20,
+                    connect_timeout=5,
+                    pool_timeout=5
                 )
             elif is_photo:
                 await update.effective_message.reply_photo(
                     photo=direct_url,
                     caption=caption,
                     parse_mode='HTML',
-                    read_timeout=30,
-                    write_timeout=30,
-                    connect_timeout=10,
-                    pool_timeout=10
+                    read_timeout=20,
+                    write_timeout=20,
+                    connect_timeout=5,
+                    pool_timeout=5
                 )
             else:
                 await update.effective_message.reply_video(
@@ -130,10 +130,10 @@ class DownloadWorker:
                     caption=caption,
                     parse_mode='HTML',
                     supports_streaming=True,
-                    read_timeout=30,
-                    write_timeout=30,
-                    connect_timeout=10,
-                    pool_timeout=10
+                    read_timeout=20,
+                    write_timeout=20,
+                    connect_timeout=5,
+                    pool_timeout=5
                 )
             return True
         except Exception as e:
@@ -147,10 +147,10 @@ class DownloadWorker:
             await update.effective_message.reply_audio(
                 audio=audio_url,
                 caption="🎵",
-                read_timeout=60,
-                write_timeout=60,
-                connect_timeout=30,
-                pool_timeout=30
+                read_timeout=30,
+                write_timeout=30,
+                connect_timeout=10,
+                pool_timeout=10
             )
             logger.info("Auto audio send successful")
         except Exception as e:
@@ -158,7 +158,7 @@ class DownloadWorker:
             # Try downloading and sending
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(audio_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    async with session.get(audio_url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 200:
                             audio_data = await resp.read()
                             if len(audio_data) > 1000:  # Verify it's not empty
@@ -191,10 +191,10 @@ class DownloadWorker:
             
             await update.effective_message.reply_media_group(
                 media=media_group,
-                read_timeout=60,
-                write_timeout=60,
-                connect_timeout=30,
-                pool_timeout=30
+                read_timeout=30,
+                write_timeout=30,
+                connect_timeout=10,
+                pool_timeout=10
             )
             logger.info(f"Media group sent successfully ({len(images_to_send)} images)")
             return True
@@ -271,7 +271,7 @@ class DownloadWorker:
                                 if audio_url:
                                     await self._send_audio_auto(update, audio_url, user_id)
                                 
-                                await status_message.delete()
+                                await status_message.edit_text("✅ @zerob1ade")
                                 return
                         elif await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):
                             logger.info("Fast direct URL send successful!")
@@ -280,7 +280,7 @@ class DownloadWorker:
                             if audio_url and not is_audio and not is_photo:
                                 await self._send_audio_auto(update, audio_url, user_id)
                             
-                            await status_message.delete()
+                            await status_message.edit_text("✅ @zerob1ade")
                             return
                         logger.info("Direct URL send failed, falling back to download...")
                 except Exception as e:
@@ -306,20 +306,20 @@ class DownloadWorker:
                         audio=file,
                         caption=metadata,
                         parse_mode='HTML',
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60,
-                        pool_timeout=60
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=10,
+                        pool_timeout=10
                     )
                 elif is_photo_file:
                     await update.effective_message.reply_photo(
                         photo=file,
                         caption=metadata,
                         parse_mode='HTML',
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60,
-                        pool_timeout=60
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=10,
+                        pool_timeout=10
                     )
                 else:
                     await update.effective_message.reply_video(
@@ -327,10 +327,10 @@ class DownloadWorker:
                         caption=metadata,
                         parse_mode='HTML',
                         supports_streaming=True,
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60,
-                        pool_timeout=60
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=10,
+                        pool_timeout=10
                     )
             await self.update_status(status_message, user_id, 'status_sending', 100)
             logger.info("File sent successfully")
@@ -399,12 +399,12 @@ class DownloadWorker:
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
 
-            # Delete status message
+            # Edit status message to show completion with dev credit
             try:
-                await status_message.delete()
-                logger.info("Status message deleted")
+                await status_message.edit_text("✅ @zerob1ade")
+                logger.info("Status message updated to done")
             except Exception as e:
-                logger.error(f"Error deleting status message: {e}")
+                logger.debug(f"Error updating status message: {e}")
 
 class DownloadManager:
     """High-performance download manager with optimized concurrency"""
@@ -489,29 +489,30 @@ class DownloadManager:
                 # Cleanup existing resources
                 await self._cleanup_resources()
                 
-                # Initialize connector with optimized settings
+                # Initialize connector with optimized settings for speed
                 self.connector = aiohttp.TCPConnector(
-                    limit=self.max_concurrent_downloads,
-                    limit_per_host=20,
+                    limit=100,  # Increased from 50
+                    limit_per_host=30,  # Increased from 20
                     enable_cleanup_closed=True,
-                    force_close=True,
-                    ttl_dns_cache=300,
-                    ssl=False  # Disable SSL verification for better performance
+                    force_close=False,  # Keep connections alive
+                    ttl_dns_cache=600,  # Longer DNS cache
+                    ssl=False,  # Disable SSL verification for better performance
+                    keepalive_timeout=30  # Keep connections alive longer
                 )
                 
-                # Initialize session with optimized settings
+                # Initialize session with optimized settings for speed
                 self.session = aiohttp.ClientSession(
                     connector=self.connector,
                     timeout=aiohttp.ClientTimeout(
-                        total=300,
-                        connect=60,
-                        sock_read=60,
-                        sock_connect=60
+                        total=120,  # Reduced from 300
+                        connect=10,  # Reduced from 60
+                        sock_read=30,  # Reduced from 60
+                        sock_connect=10  # Reduced from 60
                     ),
                     headers={
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                         'Accept': '*/*',
-                        'Accept-Encoding': 'gzip, deflate',
+                        'Accept-Encoding': 'gzip, deflate, br',
                         'Connection': 'keep-alive'
                     }
                 )
