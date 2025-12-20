@@ -12,13 +12,36 @@ from ..config import DOWNLOADS_DIR
 
 logger = logging.getLogger(__name__)
 
+# Free Russian proxies (rotated on failure)
+RUSSIAN_PROXIES = [
+    "http://45.8.179.241:1447",
+    "http://185.15.172.212:3128",
+    "http://194.67.37.177:3128",
+    "http://46.8.222.67:8080",
+    "http://91.107.196.176:8080",
+    "http://195.208.131.189:56297",
+    "http://83.69.0.13:8080",
+    "http://176.99.2.52:8080",
+    "http://194.87.188.114:8000",
+    "http://45.130.141.63:8080",
+]
+
 class YandexMusicDownloader(BaseDownloader):
     """Downloader for Yandex Music"""
 
     def __init__(self):
         super().__init__()
         self.client = None
+        self._working_proxy = None
         self._init_client()
+
+    def _get_proxy(self) -> Optional[str]:
+        """Get a working Russian proxy"""
+        import random
+        if self._working_proxy:
+            return self._working_proxy
+        # Return random proxy from list
+        return random.choice(RUSSIAN_PROXIES)
 
     def _init_client(self):
         """Initialize Yandex Music client"""
@@ -76,16 +99,42 @@ class YandexMusicDownloader(BaseDownloader):
                 'Accept': 'application/json',
             }
             
-            response = await asyncio.to_thread(requests.get, oembed_url, headers=headers, timeout=10)
+            # Try with proxy first
+            proxy = self._get_proxy()
+            proxies = {'http': proxy, 'https': proxy} if proxy else None
+            
+            try:
+                response = await asyncio.to_thread(
+                    requests.get, oembed_url, headers=headers, proxies=proxies, timeout=10
+                )
+                
+                if response.status_code == 200:
+                    self._working_proxy = proxy  # Remember working proxy
+                    data = response.json()
+                    title = data.get('title', '')
+                    author = data.get('author_name', '')
+                    
+                    if title:
+                        if author and author not in title:
+                            query = f"{author} - {title}"
+                        else:
+                            query = title
+                        logger.info(f"[Yandex] Got from oEmbed: {query}")
+                        return {'search_query': query, 'title': title, 'artist': author}
+            except:
+                pass
+            
+            # Try without proxy
+            response = await asyncio.to_thread(
+                requests.get, oembed_url, headers=headers, timeout=10
+            )
             
             if response.status_code == 200:
                 data = response.json()
-                # oEmbed returns title in format "Artist — Track" or just track name
                 title = data.get('title', '')
                 author = data.get('author_name', '')
                 
                 if title:
-                    # If author is separate, combine them
                     if author and author not in title:
                         query = f"{author} - {title}"
                     else:
@@ -100,11 +149,10 @@ class YandexMusicDownloader(BaseDownloader):
         return None
 
     async def _get_track_info_via_mobile(self, track_id: str, album_id: str = None) -> Optional[Dict]:
-        """Get track info via mobile API"""
+        """Get track info via mobile API with proxy"""
         logger.info(f"[Yandex] Trying mobile API for track: {track_id}")
         
         try:
-            # Try mobile endpoint which may have different geo restrictions
             headers = {
                 'User-Agent': 'YandexMusic/5.0 (iPhone; iOS 16.0)',
                 'Accept': 'application/json',
@@ -113,7 +161,35 @@ class YandexMusicDownloader(BaseDownloader):
             
             api_url = f"https://api.music.yandex.net/tracks/{track_id}"
             
-            response = await asyncio.to_thread(requests.get, api_url, headers=headers, timeout=10)
+            # Try with proxy
+            proxy = self._get_proxy()
+            proxies = {'http': proxy, 'https': proxy} if proxy else None
+            
+            try:
+                response = await asyncio.to_thread(
+                    requests.get, api_url, headers=headers, proxies=proxies, timeout=10
+                )
+                
+                if response.status_code == 200:
+                    self._working_proxy = proxy
+                    data = response.json()
+                    if data.get('result') and len(data['result']) > 0:
+                        track = data['result'][0]
+                        title = track.get('title', '')
+                        artists = [a.get('name', '') for a in track.get('artists', [])]
+                        artist_str = ', '.join(filter(None, artists))
+                        
+                        if title:
+                            query = f"{artist_str} - {title}" if artist_str else title
+                            logger.info(f"[Yandex] Got from mobile API: {query}")
+                            return {'search_query': query, 'title': title, 'artist': artist_str}
+            except:
+                pass
+            
+            # Try without proxy
+            response = await asyncio.to_thread(
+                requests.get, api_url, headers=headers, timeout=10
+            )
             
             if response.status_code == 200:
                 data = response.json()

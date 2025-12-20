@@ -30,34 +30,25 @@ class InstagramResult:
 class InstagramAPIService:
     """Alternative Instagram download services"""
     
+    # More services for better success rate
     SERVICES = [
+        ("igram", "https://igram.world/api/convert"),
         ("saveig", "https://v3.saveig.app/api/ajaxSearch"),
         ("snapinsta", "https://snapinsta.app/api/ajaxSearch"),
         ("fastdl", "https://fastdl.app/api/ajaxSearch"),
         ("igdownloader", "https://igdownloader.app/api/ajaxSearch"),
         ("sssinstagram", "https://sssinstagram.com/api/ajaxSearch"),
+        ("instavideosave", "https://instavideosave.net/api/ajaxSearch"),
+        ("saveinsta", "https://saveinsta.io/api/ajaxSearch"),
     ]
     
     def __init__(self):
         self._user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
         ]
-        self._cookies = self._load_cookies()
-    
-    def _load_cookies(self) -> dict:
-        """Load cookies from environment"""
-        import os
-        cookies = {}
-        cookie_str = os.getenv('INSTAGRAM_COOKIES', '')
-        if cookie_str:
-            for cookie in cookie_str.split(';'):
-                cookie = cookie.strip()
-                if '=' in cookie:
-                    name, value = cookie.split('=', 1)
-                    cookies[name.strip()] = value.strip()
-        return cookies
     
     def _get_user_agent(self) -> str:
         return random.choice(self._user_agents)
@@ -74,6 +65,81 @@ class InstagramAPIService:
             if match:
                 return match.group(1)
         return None
+
+    async def _try_igram(self, url: str) -> InstagramResult:
+        """Try igram.world API"""
+        try:
+            api_url = "https://api.igram.world/api/convert"
+            
+            headers = {
+                'User-Agent': self._get_user_agent(),
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Origin': 'https://igram.world',
+                'Referer': 'https://igram.world/',
+            }
+            
+            payload = {"url": url}
+            
+            response = await asyncio.to_thread(
+                requests.post, api_url, json=payload, headers=headers, timeout=20
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get('items', [])
+                
+                if items:
+                    for item in items:
+                        video_url = item.get('url')
+                        if video_url and '.mp4' in video_url:
+                            return InstagramResult(success=True, video_url=video_url, is_video=True)
+                        elif video_url:
+                            return InstagramResult(success=True, image_urls=[video_url], is_video=False)
+            
+            return InstagramResult(success=False, error="igram failed")
+            
+        except Exception as e:
+            logger.debug(f"[igram] Error: {e}")
+            return InstagramResult(success=False, error=str(e))
+
+    async def _try_ddinstagram(self, url: str) -> InstagramResult:
+        """Try ddinstagram proxy (like ddg for TikTok)"""
+        try:
+            shortcode = self._extract_shortcode(url)
+            if not shortcode:
+                return InstagramResult(success=False, error="Invalid URL")
+            
+            # ddinstagram mirrors Instagram content
+            dd_url = f"https://ddinstagram.com/p/{shortcode}/"
+            
+            headers = {
+                'User-Agent': self._get_user_agent(),
+                'Accept': 'text/html',
+            }
+            
+            response = await asyncio.to_thread(
+                requests.get, dd_url, headers=headers, timeout=15, allow_redirects=True
+            )
+            
+            if response.status_code == 200:
+                html = response.text
+                
+                # Find video URL
+                video_match = re.search(r'<source[^>]+src="([^"]+\.mp4[^"]*)"', html)
+                if video_match:
+                    return InstagramResult(success=True, video_url=video_match.group(1), is_video=True)
+                
+                # Find image URL
+                img_match = re.search(r'<img[^>]+class="[^"]*post[^"]*"[^>]+src="([^"]+)"', html)
+                if img_match:
+                    return InstagramResult(success=True, image_urls=[img_match.group(1)], is_video=False)
+            
+            return InstagramResult(success=False, error="ddinstagram failed")
+            
+        except Exception as e:
+            logger.debug(f"[ddinstagram] Error: {e}")
+            return InstagramResult(success=False, error=str(e))
 
     async def _try_saveig_style(self, name: str, api_url: str, url: str) -> InstagramResult:
         """Try SaveIG-style API (used by multiple services)"""
@@ -146,7 +212,7 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, graphql_url, headers=headers, cookies=self._cookies, timeout=15
+                requests.get, graphql_url, headers=headers, timeout=15
             )
             
             if response.status_code == 200:
@@ -190,7 +256,7 @@ class InstagramAPIService:
             }
             
             response = await asyncio.to_thread(
-                requests.get, api_url, headers=headers, cookies=self._cookies, timeout=15
+                requests.get, api_url, headers=headers, timeout=15
             )
             
             if response.status_code == 200:
@@ -299,39 +365,53 @@ class InstagramAPIService:
     async def get_video_url(self, url: str) -> InstagramResult:
         """Try all services to get video URL"""
         
-        # 1. Try GraphQL API first (most reliable for public content)
+        # 1. Try igram.world first (often works well)
+        logger.info("[Instagram API] Trying igram.world...")
+        result = await self._try_igram(url)
+        if result.success:
+            logger.info("[Instagram API] Success with igram")
+            return result
+        
+        # 2. Try ddinstagram proxy
+        logger.info("[Instagram API] Trying ddinstagram...")
+        result = await self._try_ddinstagram(url)
+        if result.success:
+            logger.info("[Instagram API] Success with ddinstagram")
+            return result
+        
+        # 3. Try GraphQL API
         logger.info("[Instagram API] Trying GraphQL API...")
         result = await self._try_graphql_api(url)
         if result.success:
             logger.info("[Instagram API] Success with GraphQL")
             return result
         
-        # 2. Try Instagram API v1 (mobile API)
+        # 4. Try Instagram API v1 (mobile API)
         logger.info("[Instagram API] Trying API v1...")
         result = await self._try_instagram_api_v1(url)
         if result.success:
             logger.info("[Instagram API] Success with API v1")
             return result
         
-        # 3. Shuffle and try SaveIG-style services
+        # 5. Shuffle and try SaveIG-style services
         services = self.SERVICES.copy()
         random.shuffle(services)
         
-        for name, api_url in services[:3]:  # Try max 3
+        for name, api_url in services[:4]:  # Try max 4
             logger.info(f"[Instagram API] Trying {name}...")
             result = await self._try_saveig_style(name, api_url, url)
             if result.success:
                 logger.info(f"[Instagram API] Success with {name}")
                 return result
         
-        # 4. Try embed scraping
+        # 6. Try embed scraping
         logger.info("[Instagram API] Trying embed scraping...")
         result = await self._try_rapi_style(url)
         if result.success:
             logger.info("[Instagram API] Success with embed")
             return result
         
-        # 5. Try oEmbed as last resort (at least get image)
+        # 7. Try oEmbed as last resort (at least get image)
         logger.info("[Instagram API] Trying oEmbed...")
         result = await self._try_instagram_oembed(url)
         if result.success:
