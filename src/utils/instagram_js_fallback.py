@@ -6,6 +6,7 @@ Uses local Node.js service from Instagram-Video-Downloader-API
 
 import asyncio
 import logging
+import os
 import aiohttp
 import requests
 from pathlib import Path
@@ -14,8 +15,8 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-# Configuration - Node.js service must be running on this port
-JS_API_BASE_URL = "http://localhost:3000"
+# Configuration - Node.js service URL (from env or default to localhost)
+JS_API_BASE_URL = os.getenv("JS_API_URL", "http://localhost:3000")
 JS_API_TIMEOUT = 60  # seconds for API request
 DOWNLOAD_TIMEOUT = 120  # seconds for downloading the actual video
 
