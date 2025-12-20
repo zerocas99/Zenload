@@ -229,8 +229,9 @@ class DownloadWorker:
             # Set up progress callback
             downloader.set_progress_callback(self.progress_callback)
             
-            # Initial status
-            await self.update_status(status_message, user_id, 'status_getting_info', 0)
+            # Initial status (only if we have status_message)
+            if status_message:
+                await self.update_status(status_message, user_id, 'status_getting_info', 0)
             
             # Try to get direct URL first (fast method)
             direct_url = None
@@ -285,7 +286,11 @@ class DownloadWorker:
                                 if audio_url:
                                     await self._send_audio_auto(update, audio_url, user_id)
                                 
-                                await status_message.delete()
+                                if status_message:
+                                    try:
+                                        await status_message.delete()
+                                    except:
+                                        pass
                                 return
                         elif await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):
                             logger.info("Fast direct URL send successful!")
@@ -294,7 +299,11 @@ class DownloadWorker:
                             if audio_url and not is_audio and not is_photo:
                                 await self._send_audio_auto(update, audio_url, user_id)
                             
-                            await status_message.delete()
+                            if status_message:
+                                try:
+                                    await status_message.delete()
+                                except:
+                                    pass
                             return
                         logger.info("Direct URL send failed, falling back to download...")
                 except Exception as e:
@@ -318,8 +327,9 @@ class DownloadWorker:
             else:
                 metadata = dev_credit.strip()
             
-            # Sending phase
-            await self.update_status(status_message, user_id, 'status_sending', 0)
+            # Sending phase (only update status if we have status_message)
+            if status_message:
+                await self.update_status(status_message, user_id, 'status_sending', 0)
             logger.info("Sending file to Telegram...")
             
             # Determine file type by extension
@@ -359,7 +369,8 @@ class DownloadWorker:
                         connect_timeout=10,
                         pool_timeout=10
                     )
-            await self.update_status(status_message, user_id, 'status_sending', 100)
+            if status_message:
+                await self.update_status(status_message, user_id, 'status_sending', 100)
             logger.info("File sent successfully")
 
         except DownloadError as e:
@@ -426,12 +437,13 @@ class DownloadWorker:
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
 
-            # Delete status message silently
-            try:
-                await status_message.delete()
-                logger.info("Status message deleted")
-            except Exception as e:
-                logger.debug(f"Error deleting status message: {e}")
+            # Delete status message silently (only if exists)
+            if status_message:
+                try:
+                    await status_message.delete()
+                    logger.info("Status message deleted")
+                except Exception as e:
+                    logger.debug(f"Error deleting status message: {e}")
 
 class DownloadManager:
     """High-performance download manager with optimized concurrency"""
@@ -649,11 +661,18 @@ class DownloadManager:
             
             # Check user's concurrent downloads limit
             if len(self.active_downloads.get(user_id, {})) >= self.max_downloads_per_user:
-                await status_message.edit_text(
-                    DownloadWorker(self.localization, self.settings_manager, self.session, self.activity_logger, self.keyboard_builder).get_message(
-                        user_id, 'error_too_many_downloads'
+                if status_message:
+                    await status_message.edit_text(
+                        DownloadWorker(self.localization, self.settings_manager, self.session, self.activity_logger, self.keyboard_builder).get_message(
+                            user_id, 'error_too_many_downloads'
+                        )
                     )
-                )
+                else:
+                    await update.effective_message.reply_text(
+                        DownloadWorker(self.localization, self.settings_manager, self.session, self.activity_logger, self.keyboard_builder).get_message(
+                            user_id, 'error_too_many_downloads'
+                        )
+                    )
                 return
             
             # Create worker and queue download

@@ -115,15 +115,15 @@ class MessageHandlers:
                 )
             return
 
-        # Send initial status (invisible placeholder that will be edited/deleted)
+        # Create a placeholder message (will be deleted immediately or used for quality selection)
+        status_message = None
         try:
             status_message = await update.message.reply_text("⏳")
         except Exception:
-            # If can't reply (no admin rights), try without reply
-            status_message = await update.effective_chat.send_message("⏳")
-
-        if not status_message:
-            return  # Can't send messages at all
+            try:
+                status_message = await update.effective_chat.send_message("⏳")
+            except:
+                pass
 
         try:
             # Get available formats
@@ -140,13 +140,21 @@ class MessageHandlers:
                 
                 # If default quality is set and not 'ask', start download
                 if settings.default_quality != 'ask':
-                    # Create download task
+                    # Delete status message immediately - no need to show it
+                    if status_message:
+                        try:
+                            await status_message.delete()
+                        except:
+                            pass
+                        status_message = None
+                    
+                    # Create download task without status message
                     download_task = asyncio.create_task(
                         self.download_manager.process_download(
                             downloader, 
                             url, 
                             update, 
-                            status_message, 
+                            None,  # No status message
                             settings.default_quality
                         )
                     )
@@ -161,20 +169,28 @@ class MessageHandlers:
                     )
                     return
                 
-                # Show quality selection keyboard
-                await status_message.edit_text(
-                    self.get_message(user_id, 'select_quality'),
-                    reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
-                )
+                # Show quality selection keyboard (use status_message for this)
+                if status_message:
+                    await status_message.edit_text(
+                        self.get_message(user_id, 'select_quality'),
+                        reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
+                    )
             else:
+                # Delete status message - no need to show it
+                if status_message:
+                    try:
+                        await status_message.delete()
+                    except:
+                        pass
+                    status_message = None
+                
                 # If no formats available, download with default settings
-                # Create download task
                 download_task = asyncio.create_task(
                     self.download_manager.process_download(
                         downloader, 
                         url, 
                         update, 
-                        status_message
+                        None  # No status message
                     )
                 )
                 

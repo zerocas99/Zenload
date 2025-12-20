@@ -216,26 +216,25 @@ class InstagramStoriesService:
         for idx, item in enumerate(data):
             if isinstance(item, dict) and 'url' in item:
                 url = item['url']
+                thumb = item.get('thumbnail', '')
+                
                 if isinstance(url, str) and url.startswith('http'):
                     item_matched = False
                     
                     if story_id:
-                        # Method 1: Decode JWT token to get original Instagram URL
+                        # Method 1: Decode main URL JWT token
                         original_url = self._decode_jwt_url(url)
                         if original_url:
-                            # Extract story ID from original Instagram URL
                             extracted_id = self._extract_story_id_from_instagram_url(original_url)
                             if extracted_id and extracted_id == story_id:
                                 item_matched = True
-                                logger.info(f"[Stories] Found story_id via JWT decode at index {idx}")
+                                logger.info(f"[Stories] Found story_id via URL JWT decode at index {idx}")
                             
-                            # Also check if story_id is directly in the original URL
                             if story_id in original_url:
                                 item_matched = True
                                 logger.info(f"[Stories] Found story_id in original URL at index {idx}")
                         
-                        # Method 2: Check thumbnail JWT
-                        thumb = item.get('thumbnail', '')
+                        # Method 2: Check thumbnail JWT (but still use main URL for download)
                         if thumb and not item_matched:
                             thumb_original = self._decode_jwt_url(thumb)
                             if thumb_original:
@@ -251,17 +250,23 @@ class InstagramStoriesService:
                                 item_matched = True
                                 logger.info(f"[Stories] Found story_id in item string at index {idx}")
                     
-                    is_video = '.mp4' in url.lower() or 'video' in url.lower()
+                    # Determine if video by checking the main URL (not thumbnail)
+                    is_video = False
+                    if original_url:
+                        is_video = '.mp4' in original_url.lower() or 'video' in original_url.lower()
+                    if not is_video:
+                        is_video = '.mp4' in url.lower() or 'video' in url.lower()
+                    
                     media_item = {
                         'type': 'video' if is_video else 'photo',
-                        'url': url,
+                        'url': url,  # Always use main URL, not thumbnail
                         'index': idx,
                         'matched': item_matched
                     }
                     
                     # If we found matching story, return it immediately
                     if item_matched:
-                        logger.info(f"[Stories] Returning matched story at index {idx}")
+                        logger.info(f"[Stories] Returning matched story at index {idx}, type={media_item['type']}, url={url[:80]}...")
                         return [media_item]
                     
                     items.append(media_item)
