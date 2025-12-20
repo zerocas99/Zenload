@@ -100,12 +100,22 @@ class DownloadWorker:
         except Exception as e:
             logger.error(f"Error in progress callback: {str(e)}")
 
-    async def _try_direct_url_send(self, update: Update, direct_url: str, is_audio: bool = False, caption: str = None) -> bool:
+    async def _try_direct_url_send(self, update: Update, direct_url: str, is_audio: bool = False, caption: str = None, is_photo: bool = False) -> bool:
         """Try to send media directly via URL (fast method). Returns True if successful."""
         try:
             if is_audio:
                 await update.effective_message.reply_audio(
                     audio=direct_url,
+                    caption=caption,
+                    parse_mode='HTML',
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=10,
+                    pool_timeout=10
+                )
+            elif is_photo:
+                await update.effective_message.reply_photo(
+                    photo=direct_url,
                     caption=caption,
                     parse_mode='HTML',
                     read_timeout=30,
@@ -186,10 +196,25 @@ class DownloadWorker:
             await self.update_status(status_message, user_id, 'status_sending', 0)
             logger.info("Sending file to Telegram...")
             
+            # Determine file type by extension
+            file_ext = file_path.suffix.lower()
+            is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']
+            is_photo_file = file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+            
             with open(file_path, 'rb') as file:
-                if file_path.suffix.lower() in ['.mp3', '.m4a', '.wav']:
+                if is_audio_file:
                     await update.effective_message.reply_audio(
                         audio=file,
+                        caption=metadata,
+                        parse_mode='HTML',
+                        read_timeout=60,
+                        write_timeout=60,
+                        connect_timeout=60,
+                        pool_timeout=60
+                    )
+                elif is_photo_file:
+                    await update.effective_message.reply_photo(
+                        photo=file,
                         caption=metadata,
                         parse_mode='HTML',
                         read_timeout=60,
@@ -231,7 +256,13 @@ class DownloadWorker:
             # Log download completion if logger is available
             if self.activity_logger:
                 success = file_path is not None  # If we have a file_path, download was successful
-                file_type = 'audio' if file_path and file_path.suffix.lower() in ['.mp3', '.m4a', '.wav'] else 'video'
+                file_ext = Path(file_path).suffix.lower() if file_path else ''
+                if file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']:
+                    file_type = 'audio'
+                elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                    file_type = 'photo'
+                else:
+                    file_type = 'video'
                 file_size = Path(file_path).stat().st_size if file_path else None
                 error_type = str(e) if 'e' in locals() else None
                 

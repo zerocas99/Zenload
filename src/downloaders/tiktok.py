@@ -1,4 +1,4 @@
-"""TikTok downloader - Cobalt API primary, yt-dlp fallback"""
+"""TikTok downloader - TikWm primary, Cobalt secondary, yt-dlp fallback"""
 
 import re
 import os
@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import yt_dlp
 from .base import BaseDownloader, DownloadError
 from ..utils.cobalt_service import cobalt
+from ..utils.tikwm_service import tikwm_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,16 @@ class TikTokDownloader(BaseDownloader):
         Try to get direct URL for fast sending (without downloading to server).
         Returns: (direct_url, metadata, is_audio)
         """
+        # Try TikWm first (faster and more reliable)
+        try:
+            direct_url, metadata, is_audio = await tikwm_service.get_direct_url(url)
+            if direct_url:
+                logger.info(f"[TikTok] Got direct URL from TikWm")
+                return direct_url, metadata, is_audio
+        except Exception as e:
+            logger.debug(f"[TikTok] TikWm get_direct_url failed: {e}")
+        
+        # Fallback to Cobalt
         try:
             result = await asyncio.wait_for(
                 cobalt.request(url),
@@ -57,7 +68,7 @@ class TikTokDownloader(BaseDownloader):
                 return result.url, metadata, is_audio
                 
         except Exception as e:
-            logger.debug(f"[TikTok] get_direct_url failed: {e}")
+            logger.debug(f"[TikTok] Cobalt get_direct_url failed: {e}")
         
         return None, None, False
 
@@ -103,13 +114,28 @@ class TikTokDownloader(BaseDownloader):
             return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download video - Cobalt first, yt-dlp fallback"""
+        """Download video - TikWm first, Cobalt second, yt-dlp fallback"""
         logger.info(f"[TikTok] Downloading: {url}")
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
         
-        # === Try Cobalt (no watermark!) ===
-        self.update_progress('status_downloading', 10)
+        # === 1. Try TikWm (fastest, no watermark) ===
+        self.update_progress('status_downloading', 5)
+        try:
+            filename, file_path, metadata = await tikwm_service.download(
+                url,
+                download_dir,
+                progress_callback=self.update_progress
+            )
+            
+            if file_path and file_path.exists():
+                logger.info("[TikTok] Downloaded via TikWm")
+                return metadata, file_path
+        except Exception as e:
+            logger.warning(f"[TikTok] TikWm failed: {e}")
+        
+        # === 2. Try Cobalt (no watermark!) ===
+        self.update_progress('status_downloading', 20)
         filename, file_path = await cobalt.download(
             url, 
             download_dir,
@@ -119,11 +145,12 @@ class TikTokDownloader(BaseDownloader):
         
         if file_path and file_path.exists():
             metadata = f"TikTok\n<a href=\"{url}\">Ссылка</a>"
+            logger.info("[TikTok] Downloaded via Cobalt")
             return metadata, file_path
         
-        # === Fallback to yt-dlp ===
+        # === 3. Fallback to yt-dlp ===
         logger.info("[TikTok] Cobalt failed, trying yt-dlp")
-        self.update_progress('status_downloading', 30)
+        self.update_progress('status_downloading', 40)
         
         try:
             temp_filename = f"tiktok_{os.urandom(4).hex()}"
