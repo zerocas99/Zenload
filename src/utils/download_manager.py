@@ -208,24 +208,29 @@ class DownloadWorker:
             is_audio = False
             metadata = None
             audio_url = None
+            is_photo = False
             
             if hasattr(downloader, 'get_direct_url'):
                 try:
                     result = await downloader.get_direct_url(url)
-                    # Handle both 3-tuple and 4-tuple returns
-                    if len(result) == 4:
+                    # Handle 3-tuple, 4-tuple, and 5-tuple returns
+                    if len(result) == 5:
+                        direct_url, metadata, is_audio, audio_url, is_photo = result
+                    elif len(result) == 4:
                         direct_url, metadata, is_audio, audio_url = result
+                        is_photo = False
                     else:
                         direct_url, metadata, is_audio = result
                         audio_url = None
+                        is_photo = False
                     
                     if direct_url:
-                        logger.info(f"Got direct URL, trying fast send...")
-                        if await self._try_direct_url_send(update, direct_url, is_audio, metadata):
+                        logger.info(f"Got direct URL, trying fast send... (photo={is_photo})")
+                        if await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):
                             logger.info("Fast direct URL send successful!")
                             
-                            # Auto-send audio if available (TikTok music)
-                            if audio_url and not is_audio:
+                            # Auto-send audio if available (TikTok music) - but NOT for photos
+                            if audio_url and not is_audio and not is_photo:
                                 await self._send_audio_auto(update, audio_url, user_id)
                             
                             await status_message.delete()

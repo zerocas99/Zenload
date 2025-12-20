@@ -56,10 +56,10 @@ class InstagramDownloader(BaseDownloader):
     def can_handle(self, url: str) -> bool:
         return any(x in url for x in ["instagram.com", "instagr.am"])
 
-    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str]]:
+    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool]:
         """
         Try to get direct URL for fast sending (without downloading to server).
-        Returns: (direct_url, metadata, is_audio, audio_url)
+        Returns: (direct_url, metadata, is_audio, audio_url, is_photo)
         """
         try:
             # Try Cobalt to get direct URL
@@ -71,13 +71,14 @@ class InstagramDownloader(BaseDownloader):
             if result.success and result.url:
                 metadata = self._metadata_template.format(url=url)
                 is_audio = result.url.endswith(('.mp3', '.m4a', '.wav'))
-                logger.info(f"[Instagram] Got direct URL from Cobalt")
-                return result.url, metadata, is_audio, None
+                is_photo = result.url.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
+                logger.info(f"[Instagram] Got direct URL from Cobalt (photo={is_photo})")
+                return result.url, metadata, is_audio, None, is_photo
                 
         except Exception as e:
             logger.debug(f"[Instagram] get_direct_url failed: {e}")
         
-        return None, None, False, None
+        return None, None, False, None, False
 
     async def get_formats(self, url: str) -> List[Dict]:
         """Get available formats"""
