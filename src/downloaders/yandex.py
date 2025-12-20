@@ -151,16 +151,11 @@ class YandexMusicDownloader(BaseDownloader):
         
         # Prepare filename from query
         safe_filename = self._prepare_filename(query)
-        file_path = DOWNLOADS_DIR / f"{safe_filename}.mp3"
         
+        # Download best audio without conversion (no ffmpeg needed)
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
             'outtmpl': str(DOWNLOADS_DIR / f"{safe_filename}.%(ext)s"),
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '320',
-            }],
             'nooverwrites': True,
             'no_color': True,
             'quiet': False,
@@ -189,19 +184,21 @@ class YandexMusicDownloader(BaseDownloader):
                     metadata = f"{title}\nBy: {channel}\nLength: {duration_mins}:{duration_rem:02d}\n(via YouTube)"
                     
                     # Find the downloaded file
-                    if file_path.exists():
-                        return metadata, file_path
-                    
                     actual_filename = ydl.prepare_filename(entry)
-                    actual_path = Path(actual_filename).with_suffix('.mp3')
+                    actual_path = Path(actual_filename)
                     if actual_path.exists():
                         return metadata, actual_path
                     
+                    # Try common extensions
                     base_path = Path(actual_filename).with_suffix('')
-                    for ext in ['.mp3', '.m4a', '.webm', '.opus']:
+                    for ext in ['.m4a', '.webm', '.opus', '.mp3', '.ogg']:
                         check_path = base_path.with_suffix(ext)
                         if check_path.exists():
                             return metadata, check_path
+                    
+                    # Search in downloads dir
+                    for f in DOWNLOADS_DIR.glob(f"{safe_filename}.*"):
+                        return metadata, f
                     
         except Exception as e:
             logger.error(f"[Yandex] YouTube download failed: {e}")

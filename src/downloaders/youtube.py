@@ -56,13 +56,19 @@ class YouTubeDownloader(BaseDownloader):
 
     def _get_ydl_opts(self, format_id: Optional[str] = None) -> Dict:
         """Get yt-dlp options"""
+        # Use more flexible format selection that doesn't require ffmpeg for merging
+        if format_id:
+            format_str = format_id
+        else:
+            # Prefer single file formats that don't need merging
+            format_str = 'best[ext=mp4]/best[ext=webm]/best'
+        
         opts = {
-            'format': format_id if format_id else 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'merge_output_format': 'mp4',
+            'format': format_str,
             'nooverwrites': True,
             'no_color': True,
             'no_warnings': True,
-            'quiet': False,  # Show download progress
+            'quiet': False,
             'progress_hooks': [self._progress_hook],
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
