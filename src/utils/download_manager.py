@@ -285,7 +285,7 @@ class DownloadWorker:
                                 if audio_url:
                                     await self._send_audio_auto(update, audio_url, user_id)
                                 
-                                await status_message.edit_text("✅ @zerob1ade")
+                                await status_message.delete()
                                 return
                         elif await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):
                             logger.info("Fast direct URL send successful!")
@@ -294,7 +294,7 @@ class DownloadWorker:
                             if audio_url and not is_audio and not is_photo:
                                 await self._send_audio_auto(update, audio_url, user_id)
                             
-                            await status_message.edit_text("✅ @zerob1ade")
+                            await status_message.delete()
                             return
                         logger.info("Direct URL send failed, falling back to download...")
                 except Exception as e:
@@ -426,12 +426,12 @@ class DownloadWorker:
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
 
-            # Edit status message to show completion with dev credit
+            # Delete status message silently
             try:
-                await status_message.edit_text("✅ @zerob1ade")
-                logger.info("Status message updated to done")
+                await status_message.delete()
+                logger.info("Status message deleted")
             except Exception as e:
-                logger.debug(f"Error updating status message: {e}")
+                logger.debug(f"Error deleting status message: {e}")
 
 class DownloadManager:
     """High-performance download manager with optimized concurrency"""

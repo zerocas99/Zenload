@@ -115,16 +115,12 @@ class MessageHandlers:
                 )
             return
 
-        # Send initial status
+        # Send initial status (invisible placeholder that will be edited/deleted)
         try:
-            status_message = await update.message.reply_text(
-                self.get_message(user_id, 'processing')
-            )
+            status_message = await update.message.reply_text("⏳")
         except Exception:
             # If can't reply (no admin rights), try without reply
-            status_message = await update.effective_chat.send_message(
-                self.get_message(user_id, 'processing')
-            )
+            status_message = await update.effective_chat.send_message("⏳")
 
         if not status_message:
             return  # Can't send messages at all

@@ -95,12 +95,12 @@ class InstagramStoriesService:
         
         return None
 
-    async def _try_js_api(self, url: str) -> Optional[List[Dict]]:
+    async def _try_js_api(self, url: str, story_id: str = None) -> Optional[List[Dict]]:
         """Try local Node.js API (snapsave-based) - most reliable"""
         try:
             encoded_url = quote(url, safe='')
             api_url = f"{JS_API_BASE_URL}/igdl?url={encoded_url}"
-            logger.info(f"[Stories JS API] Requesting...")
+            logger.info(f"[Stories JS API] Requesting... (story_id={story_id})")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -119,7 +119,14 @@ class InstagramStoriesService:
                     
                     logger.info(f"[Stories JS API] Response: {str(data)[:500]}")
                     
-                    # Extract URL using recursive helper
+                    # Try to find all media items from response
+                    all_items = self._extract_all_media_from_data(data, story_id)
+                    
+                    if all_items:
+                        logger.info(f"[Stories JS API] Found {len(all_items)} media items")
+                        return all_items
+                    
+                    # Fallback: extract single URL
                     media_url = self._extract_url_from_data(data)
                     
                     if media_url:
@@ -139,6 +146,51 @@ class InstagramStoriesService:
         except Exception as e:
             logger.debug(f"[Stories JS API] Error: {e}")
             return None
+    
+    def _extract_all_media_from_data(self, data, story_id: str = None) -> Optional[List[Dict]]:
+        """Extract all media items from API response, optionally filtering by story_id"""
+        items = []
+        
+        # Navigate to data array
+        if isinstance(data, dict):
+            if 'url' in data and isinstance(data['url'], dict):
+                data = data['url']
+            if 'data' in data and isinstance(data['data'], list):
+                data = data['data']
+        
+        if not isinstance(data, list):
+            return None
+        
+        for item in data:
+            if isinstance(item, dict) and 'url' in item:
+                url = item['url']
+                if isinstance(url, str) and url.startswith('http'):
+                    # Check if this item matches the story_id (if provided)
+                    # Story ID might be in the URL or in item metadata
+                    item_id = None
+                    if story_id:
+                        # Try to extract ID from URL
+                        if story_id in url:
+                            item_id = story_id
+                        # Check if item has id field
+                        elif item.get('id') and story_id in str(item.get('id')):
+                            item_id = story_id
+                    
+                    is_video = '.mp4' in url.lower() or 'video' in url.lower()
+                    media_item = {
+                        'type': 'video' if is_video else 'photo',
+                        'url': url,
+                        'matched_id': item_id
+                    }
+                    
+                    # If we have a story_id and this item matches, return it immediately
+                    if story_id and item_id:
+                        logger.info(f"[Stories] Found matching story by ID: {story_id}")
+                        return [media_item]
+                    
+                    items.append(media_item)
+        
+        return items if items else None
 
     async def _try_igram(self, url: str) -> Optional[List[Dict]]:
         """Try igram.world API"""
@@ -278,7 +330,7 @@ class InstagramStoriesService:
         logger.info(f"[Stories] Getting stories for @{username}, story_id={story_id}")
         
         # Try JS API first (most reliable - uses snapsave)
-        stories = await self._try_js_api(url)
+        stories = await self._try_js_api(url, story_id)
         if stories:
             logger.info(f"[Stories] Got {len(stories)} stories from JS API")
             return stories
