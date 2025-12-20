@@ -63,6 +63,77 @@ class YandexMusicDownloader(BaseDownloader):
         
         raise DownloadError("Could not extract track ID from URL")
 
+    async def _get_track_info_via_oembed(self, url: str) -> Optional[Dict]:
+        """Get track info using Yandex Music oEmbed API"""
+        logger.info(f"[Yandex] Trying oEmbed API for: {url}")
+        
+        try:
+            # oEmbed endpoint
+            oembed_url = f"https://music.yandex.ru/oembed/?url={url}&format=json"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+                'Accept': 'application/json',
+            }
+            
+            response = await asyncio.to_thread(requests.get, oembed_url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                # oEmbed returns title in format "Artist — Track" or just track name
+                title = data.get('title', '')
+                author = data.get('author_name', '')
+                
+                if title:
+                    # If author is separate, combine them
+                    if author and author not in title:
+                        query = f"{author} - {title}"
+                    else:
+                        query = title
+                    logger.info(f"[Yandex] Got from oEmbed: {query}")
+                    return {'search_query': query, 'title': title, 'artist': author}
+            
+            logger.info(f"[Yandex] oEmbed failed: {response.status_code}")
+        except Exception as e:
+            logger.info(f"[Yandex] oEmbed error: {e}")
+        
+        return None
+
+    async def _get_track_info_via_mobile(self, track_id: str, album_id: str = None) -> Optional[Dict]:
+        """Get track info via mobile API"""
+        logger.info(f"[Yandex] Trying mobile API for track: {track_id}")
+        
+        try:
+            # Try mobile endpoint which may have different geo restrictions
+            headers = {
+                'User-Agent': 'YandexMusic/5.0 (iPhone; iOS 16.0)',
+                'Accept': 'application/json',
+                'X-Yandex-Music-Client': 'YandexMusicAndroid/24123456',
+            }
+            
+            api_url = f"https://api.music.yandex.net/tracks/{track_id}"
+            
+            response = await asyncio.to_thread(requests.get, api_url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('result') and len(data['result']) > 0:
+                    track = data['result'][0]
+                    title = track.get('title', '')
+                    artists = [a.get('name', '') for a in track.get('artists', [])]
+                    artist_str = ', '.join(filter(None, artists))
+                    
+                    if title:
+                        query = f"{artist_str} - {title}" if artist_str else title
+                        logger.info(f"[Yandex] Got from mobile API: {query}")
+                        return {'search_query': query, 'title': title, 'artist': artist_str}
+            
+            logger.info(f"[Yandex] Mobile API failed: {response.status_code}")
+        except Exception as e:
+            logger.info(f"[Yandex] Mobile API error: {e}")
+        
+        return None
+
     async def _get_track_info_via_ytdlp(self, url: str) -> Optional[Dict]:
         """Get track info using yt-dlp extract_info without downloading"""
         logger.info(f"[Yandex] Extracting track info via yt-dlp: {url}")
@@ -100,13 +171,25 @@ class YandexMusicDownloader(BaseDownloader):
         return None
 
     async def _get_track_info_from_page(self, url: str, track_id: str = None, album_id: str = None) -> Optional[Dict]:
-        """Get track info by fetching Yandex Music page HTML or via yt-dlp"""
+        """Get track info using multiple methods"""
         
-        # First try yt-dlp (most reliable)
+        # 1. Try oEmbed first (often works without geo restrictions)
+        oembed_result = await self._get_track_info_via_oembed(url)
+        if oembed_result:
+            return oembed_result
+        
+        # 2. Try mobile API
+        if track_id:
+            mobile_result = await self._get_track_info_via_mobile(track_id, album_id)
+            if mobile_result:
+                return mobile_result
+        
+        # 3. Try yt-dlp
         ytdlp_result = await self._get_track_info_via_ytdlp(url)
         if ytdlp_result:
             return ytdlp_result
         
+        # 4. Try parsing HTML page
         logger.info(f"[Yandex] Fetching track info from page: {url}")
         
         try:
