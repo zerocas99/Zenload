@@ -316,6 +316,69 @@ class InstagramAPIService:
             logger.debug(f"[oEmbed] Error: {e}")
             return InstagramResult(success=False, error=str(e))
 
+    async def _try_instagram_post_page(self, url: str) -> InstagramResult:
+        """Try to get media from Instagram post page directly"""
+        try:
+            shortcode = self._extract_shortcode(url)
+            if not shortcode:
+                return InstagramResult(success=False, error="Invalid URL")
+            
+            # Try to get the post page with different approaches
+            post_url = f"https://www.instagram.com/p/{shortcode}/"
+            
+            headers = {
+                'User-Agent': self._get_user_agent(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            response = await asyncio.to_thread(
+                requests.get, post_url, headers=headers, timeout=15
+            )
+            
+            if response.status_code == 200:
+                html = response.text
+                
+                # Try to find video URL in page source
+                video_patterns = [
+                    r'"video_url":"([^"]+)"',
+                    r'"contentUrl":"([^"]+)"',
+                    r'property="og:video"[^>]+content="([^"]+)"',
+                    r'<meta[^>]+property="og:video:secure_url"[^>]+content="([^"]+)"',
+                ]
+                
+                for pattern in video_patterns:
+                    match = re.search(pattern, html)
+                    if match:
+                        video_url = match.group(1)
+                        video_url = video_url.replace('\\u0026', '&').replace('\\/', '/')
+                        if video_url.startswith('http'):
+                            return InstagramResult(success=True, video_url=video_url, is_video=True)
+                
+                # Try to find image URL
+                image_patterns = [
+                    r'"display_url":"([^"]+)"',
+                    r'property="og:image"[^>]+content="([^"]+)"',
+                    r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"',
+                ]
+                
+                for pattern in image_patterns:
+                    match = re.search(pattern, html)
+                    if match:
+                        image_url = match.group(1)
+                        image_url = image_url.replace('\\u0026', '&').replace('\\/', '/')
+                        if image_url.startswith('http'):
+                            return InstagramResult(success=True, image_urls=[image_url], is_video=False)
+            
+            return InstagramResult(success=False, error="Could not extract media from page")
+            
+        except Exception as e:
+            logger.debug(f"[post_page] Error: {e}")
+            return InstagramResult(success=False, error=str(e))
+
     async def _try_rapi_style(self, url: str) -> InstagramResult:
         """Try direct scraping approach"""
         try:
@@ -404,14 +467,21 @@ class InstagramAPIService:
                 logger.info(f"[Instagram API] Success with {name}")
                 return result
         
-        # 6. Try embed scraping
+        # 6. Try direct post page scraping
+        logger.info("[Instagram API] Trying post page scraping...")
+        result = await self._try_instagram_post_page(url)
+        if result.success:
+            logger.info("[Instagram API] Success with post page")
+            return result
+        
+        # 7. Try embed scraping
         logger.info("[Instagram API] Trying embed scraping...")
         result = await self._try_rapi_style(url)
         if result.success:
             logger.info("[Instagram API] Success with embed")
             return result
         
-        # 7. Try oEmbed as last resort (at least get image)
+        # 8. Try oEmbed as last resort (at least get image)
         logger.info("[Instagram API] Trying oEmbed...")
         result = await self._try_instagram_oembed(url)
         if result.success:
