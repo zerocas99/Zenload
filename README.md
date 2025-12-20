@@ -78,7 +78,7 @@ The scripts will automatically pull the latest changes and update everything.
 
 ## Usage
 
-1. Find @Zenload_bot on Telegram
+1. Find @ZeroLoader_Bot on Telegram
 2. Send a video URL from supported platforms
 3. Receive the downloaded video
 

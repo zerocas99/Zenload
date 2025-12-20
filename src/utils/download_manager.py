@@ -264,9 +264,9 @@ class DownloadWorker:
                         settings = self.settings_manager.get_settings(user_id)
                         lang = settings.language
                         if lang == 'ru':
-                            dev_credit = "\n\n📥 Скачано через @ZenLoad_Bot\n👨‍💻 Разработчик: @zerob1ade"
+                            dev_credit = "\n\n📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
                         else:
-                            dev_credit = "\n\n📥 Downloaded via @ZenLoad_Bot\n👨‍💻 Dev: @zerob1ade"
+                            dev_credit = "\n\n📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
                         
                         if metadata:
                             metadata = metadata + dev_credit
@@ -309,9 +309,9 @@ class DownloadWorker:
             settings = self.settings_manager.get_settings(user_id)
             lang = settings.language
             if lang == 'ru':
-                dev_credit = "\n\n📥 Скачано через @ZenLoad_Bot\n👨‍💻 Разработчик: @zerob1ade"
+                dev_credit = "\n\n📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
             else:
-                dev_credit = "\n\n📥 Downloaded via @ZenLoad_Bot\n👨‍💻 Dev: @zerob1ade"
+                dev_credit = "\n\n📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
             
             if metadata:
                 metadata = metadata + dev_credit
