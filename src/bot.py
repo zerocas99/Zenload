@@ -26,9 +26,8 @@ class ZenloadBot:
         
         # Try to acquire lock
         try:
-            pid_file = Path("/var/run/zenload.pid")  # Standard Unix PID file location
-            if not pid_file.parent.exists():
-                pid_file = Path(BASE_DIR) / "zenload.pid"  # Fallback to app directory
+            # Use app directory for PID file (works in containers)
+            pid_file = Path(BASE_DIR) / "zenload.pid"
             
             self.lock_file = pid_file
             self.lock_fd = os.open(str(self.lock_file), os.O_RDWR | os.O_CREAT, 0o644)
