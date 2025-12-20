@@ -173,6 +173,35 @@ class DownloadWorker:
             except Exception as e2:
                 logger.debug(f"Auto audio download failed: {e2}")
 
+    async def _send_media_group(self, update: Update, image_urls: list, caption: str = None) -> bool:
+        """Send multiple images as a media group (for TikTok slideshows)"""
+        try:
+            from telegram import InputMediaPhoto
+            
+            # Telegram allows max 10 items in media group
+            images_to_send = image_urls[:10]
+            
+            media_group = []
+            for i, img_url in enumerate(images_to_send):
+                # Only first image gets caption
+                if i == 0 and caption:
+                    media_group.append(InputMediaPhoto(media=img_url, caption=caption, parse_mode='HTML'))
+                else:
+                    media_group.append(InputMediaPhoto(media=img_url))
+            
+            await update.effective_message.reply_media_group(
+                media=media_group,
+                read_timeout=60,
+                write_timeout=60,
+                connect_timeout=30,
+                pool_timeout=30
+            )
+            logger.info(f"Media group sent successfully ({len(images_to_send)} images)")
+            return True
+        except Exception as e:
+            logger.debug(f"Media group send failed: {e}")
+            return False
+
     async def process_download(self, downloader, url: str, update: Update, status_message: Message, format_id: str = None) -> None:
         """Process content download with error handling and cleanup"""
         user_id = update.effective_user.id
@@ -209,24 +238,37 @@ class DownloadWorker:
             metadata = None
             audio_url = None
             is_photo = False
+            all_images = None
             
             if hasattr(downloader, 'get_direct_url'):
                 try:
                     result = await downloader.get_direct_url(url)
-                    # Handle 3-tuple, 4-tuple, and 5-tuple returns
-                    if len(result) == 5:
+                    # Handle 3-tuple, 4-tuple, 5-tuple, and 6-tuple returns
+                    if len(result) == 6:
+                        direct_url, metadata, is_audio, audio_url, is_photo, all_images = result
+                    elif len(result) == 5:
                         direct_url, metadata, is_audio, audio_url, is_photo = result
+                        all_images = None
                     elif len(result) == 4:
                         direct_url, metadata, is_audio, audio_url = result
                         is_photo = False
+                        all_images = None
                     else:
                         direct_url, metadata, is_audio = result
                         audio_url = None
                         is_photo = False
+                        all_images = None
                     
                     if direct_url:
-                        logger.info(f"Got direct URL, trying fast send... (photo={is_photo})")
-                        if await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):
+                        logger.info(f"Got direct URL, trying fast send... (photo={is_photo}, images={len(all_images) if all_images else 0})")
+                        
+                        # If multiple images (TikTok slideshow), send as media group
+                        if is_photo and all_images and len(all_images) > 1:
+                            if await self._send_media_group(update, all_images, metadata):
+                                logger.info("Media group send successful!")
+                                await status_message.delete()
+                                return
+                        elif await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):
                             logger.info("Fast direct URL send successful!")
                             
                             # Auto-send audio if available (TikTok music) - but NOT for photos

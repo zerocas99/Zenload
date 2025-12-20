@@ -73,14 +73,14 @@ class TikWmService:
             logger.error(f"[TikWm] Error: {e}")
             return None
     
-    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool]:
+    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool, Optional[list]]:
         """
         Get direct video/image URL for fast sending
-        Returns: (direct_url, metadata, is_audio, audio_url, is_photo)
+        Returns: (direct_url, metadata, is_audio, audio_url, is_photo, all_images)
         """
         info = await self.get_video_info(url)
         if not info:
-            return None, None, False, None, False
+            return None, None, False, None, False, None
         
         # Format metadata
         def format_number(num):
@@ -102,17 +102,16 @@ class TikWmService:
         if info.get('is_images') and info.get('images'):
             images = info['images']
             if images and len(images) > 0:
-                # Return first image URL, no audio for photos
-                first_image = images[0]
                 logger.info(f"[TikWm] Photo slideshow detected, {len(images)} images")
-                return first_image, metadata, False, None, True
+                # Return first image as direct_url, but also return all images
+                return images[0], metadata, False, None, True, images
         
         # Regular video
         if not info.get('video_url'):
-            return None, None, False, None, False
+            return None, None, False, None, False, None
         
         audio_url = info.get('music_url')
-        return info['video_url'], metadata, False, audio_url, False
+        return info['video_url'], metadata, False, audio_url, False, None
     
     async def download(
         self, 

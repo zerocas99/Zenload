@@ -40,23 +40,27 @@ class TikTokDownloader(BaseDownloader):
             return url
         return url.split('?')[0]
 
-    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool]:
+    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool, Optional[list]]:
         """
         Try to get direct URL for fast sending (without downloading to server).
-        Returns: (direct_url, metadata, is_audio, audio_url, is_photo)
+        Returns: (direct_url, metadata, is_audio, audio_url, is_photo, all_images)
         """
         # Try TikWm first (faster and more reliable)
         try:
             result = await tikwm_service.get_direct_url(url)
-            if len(result) == 5:
+            if len(result) == 6:
+                direct_url, metadata, is_audio, audio_url, is_photo, all_images = result
+            elif len(result) == 5:
                 direct_url, metadata, is_audio, audio_url, is_photo = result
+                all_images = None
             else:
                 direct_url, metadata, is_audio, audio_url = result
                 is_photo = False
+                all_images = None
             
             if direct_url:
-                logger.info(f"[TikTok] Got direct URL from TikWm (photo={is_photo})")
-                return direct_url, metadata, is_audio, audio_url, is_photo
+                logger.info(f"[TikTok] Got direct URL from TikWm (photo={is_photo}, images={len(all_images) if all_images else 0})")
+                return direct_url, metadata, is_audio, audio_url, is_photo, all_images
         except Exception as e:
             logger.debug(f"[TikTok] TikWm get_direct_url failed: {e}")
         
@@ -71,12 +75,12 @@ class TikTokDownloader(BaseDownloader):
                 metadata = f"TikTok\n<a href=\"{url}\">Ссылка</a>"
                 is_audio = result.url.endswith(('.mp3', '.m4a', '.wav'))
                 logger.info(f"[TikTok] Got direct URL from Cobalt")
-                return result.url, metadata, is_audio, None, False
+                return result.url, metadata, is_audio, None, False, None
                 
         except Exception as e:
             logger.debug(f"[TikTok] Cobalt get_direct_url failed: {e}")
         
-        return None, None, False, None, False
+        return None, None, False, None, False, None
 
     async def get_formats(self, url: str) -> List[Dict]:
         """Get available formats"""

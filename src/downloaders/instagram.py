@@ -11,6 +11,7 @@ from .base import BaseDownloader, DownloadError
 from ..utils.cobalt_service import cobalt
 from ..utils.instagram_api import instagram_api
 from ..utils.instagram_js_fallback import instagram_js_fallback
+from ..utils.instagram_stories_service import instagram_stories_service
 
 logger = logging.getLogger(__name__)
 
@@ -108,13 +109,32 @@ class InstagramDownloader(BaseDownloader):
             return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download video - Cobalt first, JS fallback, alternative APIs, then yt-dlp"""
+        """Download video - Cobalt first, Stories service, JS fallback, alternative APIs, then yt-dlp"""
         shortcode = self._extract_shortcode(url) or 'video'
         is_story = self._is_story_url(url)
         logger.info(f"[Instagram] Downloading: {shortcode} (story: {is_story})")
         
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
+        
+        # === 0. For Stories - try dedicated stories service first ===
+        if is_story:
+            self.update_progress('status_downloading', 5)
+            logger.info("[Instagram] Story detected, trying stories service...")
+            
+            try:
+                filename, file_path = await instagram_stories_service.download(
+                    url,
+                    download_dir,
+                    progress_callback=self.update_progress
+                )
+                
+                if file_path and file_path.exists():
+                    logger.info("[Instagram] Story downloaded via stories service")
+                    metadata = self._metadata_template.format(url=url)
+                    return metadata, file_path
+            except Exception as e:
+                logger.warning(f"[Instagram] Stories service failed: {e}")
         
         # === 1. Try Cobalt with timeout ===
         self.update_progress('status_downloading', 10)
@@ -176,8 +196,8 @@ class InstagramDownloader(BaseDownloader):
         
         # === 4. Fallback to yt-dlp (skip for stories - requires auth) ===
         if is_story:
-            logger.warning("[Instagram] Stories require authentication, skipping yt-dlp")
-            raise DownloadError("Instagram Stories require authentication. Please use Reels or Posts instead.")
+            logger.warning("[Instagram] Stories service and Cobalt failed for story")
+            raise DownloadError("Не удалось скачать Story. Возможно, аккаунт приватный или Story истекла.")
         
         logger.info("[Instagram] Alternative APIs failed, trying yt-dlp")
         self.update_progress('status_downloading', 40)
