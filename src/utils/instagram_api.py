@@ -9,8 +9,9 @@ import logging
 import re
 import subprocess
 import random
+import requests
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,9 @@ logger = logging.getLogger(__name__)
 class InstagramResult:
     success: bool
     video_url: Optional[str] = None
+    image_urls: Optional[List[str]] = None
     thumbnail: Optional[str] = None
+    is_video: bool = True
     error: Optional[str] = None
 
 
@@ -32,6 +35,7 @@ class InstagramAPIService:
         ("snapinsta", "https://snapinsta.app/api/ajaxSearch"),
         ("fastdl", "https://fastdl.app/api/ajaxSearch"),
         ("igdownloader", "https://igdownloader.app/api/ajaxSearch"),
+        ("sssinstagram", "https://sssinstagram.com/api/ajaxSearch"),
     ]
     
     def __init__(self):
@@ -105,6 +109,133 @@ class InstagramAPIService:
             logger.debug(f"[{name}] Error: {e}")
             return InstagramResult(success=False, error=str(e))
 
+    async def _try_graphql_api(self, url: str) -> InstagramResult:
+        """Try Instagram GraphQL API (works for public posts)"""
+        try:
+            shortcode = self._extract_shortcode(url)
+            if not shortcode:
+                return InstagramResult(success=False, error="Invalid URL")
+            
+            # GraphQL query for media
+            query_hash = "b3055c01b4b222b8a47dc12b090e4e64"  # Media query hash
+            variables = json.dumps({"shortcode": shortcode})
+            
+            graphql_url = f"https://www.instagram.com/graphql/query/?query_hash={query_hash}&variables={variables}"
+            
+            headers = {
+                'User-Agent': self._get_user_agent(),
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'X-IG-App-ID': '936619743392459',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': url,
+            }
+            
+            response = await asyncio.to_thread(
+                requests.get, graphql_url, headers=headers, timeout=15
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                media = data.get('data', {}).get('shortcode_media', {})
+                
+                if media:
+                    is_video = media.get('is_video', False)
+                    
+                    if is_video:
+                        video_url = media.get('video_url')
+                        if video_url:
+                            return InstagramResult(success=True, video_url=video_url, is_video=True)
+                    else:
+                        # It's an image or carousel
+                        display_url = media.get('display_url')
+                        if display_url:
+                            return InstagramResult(success=True, image_urls=[display_url], is_video=False)
+            
+            return InstagramResult(success=False, error=f"GraphQL failed: {response.status_code}")
+            
+        except Exception as e:
+            logger.debug(f"[GraphQL] Error: {e}")
+            return InstagramResult(success=False, error=str(e))
+
+    async def _try_instagram_api_v1(self, url: str) -> InstagramResult:
+        """Try Instagram API v1 endpoint"""
+        try:
+            shortcode = self._extract_shortcode(url)
+            if not shortcode:
+                return InstagramResult(success=False, error="Invalid URL")
+            
+            # Try media info endpoint
+            api_url = f"https://www.instagram.com/api/v1/media/{shortcode}/info/"
+            
+            headers = {
+                'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US',
+                'X-IG-App-ID': '936619743392459',
+            }
+            
+            response = await asyncio.to_thread(
+                requests.get, api_url, headers=headers, timeout=15
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get('items', [])
+                
+                if items:
+                    item = items[0]
+                    
+                    # Check for video
+                    video_versions = item.get('video_versions', [])
+                    if video_versions:
+                        video_url = video_versions[0].get('url')
+                        if video_url:
+                            return InstagramResult(success=True, video_url=video_url, is_video=True)
+                    
+                    # Check for image
+                    image_versions = item.get('image_versions2', {}).get('candidates', [])
+                    if image_versions:
+                        image_url = image_versions[0].get('url')
+                        if image_url:
+                            return InstagramResult(success=True, image_urls=[image_url], is_video=False)
+            
+            return InstagramResult(success=False, error=f"API v1 failed: {response.status_code}")
+            
+        except Exception as e:
+            logger.debug(f"[API v1] Error: {e}")
+            return InstagramResult(success=False, error=str(e))
+
+    async def _try_instagram_oembed(self, url: str) -> InstagramResult:
+        """Try Instagram oEmbed to get thumbnail (then try to get full media)"""
+        try:
+            oembed_url = f"https://api.instagram.com/oembed/?url={url}"
+            
+            headers = {
+                'User-Agent': self._get_user_agent(),
+                'Accept': 'application/json',
+            }
+            
+            response = await asyncio.to_thread(
+                requests.get, oembed_url, headers=headers, timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                thumbnail = data.get('thumbnail_url')
+                
+                if thumbnail:
+                    # Try to get higher resolution by modifying URL
+                    # Instagram thumbnails often have size in URL
+                    high_res = re.sub(r'/s\d+x\d+/', '/s1080x1080/', thumbnail)
+                    return InstagramResult(success=True, image_urls=[high_res, thumbnail], is_video=False)
+            
+            return InstagramResult(success=False, error="oEmbed failed")
+            
+        except Exception as e:
+            logger.debug(f"[oEmbed] Error: {e}")
+            return InstagramResult(success=False, error=str(e))
+
     async def _try_rapi_style(self, url: str) -> InstagramResult:
         """Try direct scraping approach"""
         try:
@@ -154,11 +285,24 @@ class InstagramAPIService:
     async def get_video_url(self, url: str) -> InstagramResult:
         """Try all services to get video URL"""
         
-        # Shuffle services for load balancing
+        # 1. Try GraphQL API first (most reliable for public content)
+        logger.info("[Instagram API] Trying GraphQL API...")
+        result = await self._try_graphql_api(url)
+        if result.success:
+            logger.info("[Instagram API] Success with GraphQL")
+            return result
+        
+        # 2. Try Instagram API v1 (mobile API)
+        logger.info("[Instagram API] Trying API v1...")
+        result = await self._try_instagram_api_v1(url)
+        if result.success:
+            logger.info("[Instagram API] Success with API v1")
+            return result
+        
+        # 3. Shuffle and try SaveIG-style services
         services = self.SERVICES.copy()
         random.shuffle(services)
         
-        # Try SaveIG-style services
         for name, api_url in services[:3]:  # Try max 3
             logger.info(f"[Instagram API] Trying {name}...")
             result = await self._try_saveig_style(name, api_url, url)
@@ -166,32 +310,49 @@ class InstagramAPIService:
                 logger.info(f"[Instagram API] Success with {name}")
                 return result
         
-        # Try embed scraping as last resort
+        # 4. Try embed scraping
         logger.info("[Instagram API] Trying embed scraping...")
         result = await self._try_rapi_style(url)
         if result.success:
             logger.info("[Instagram API] Success with embed")
             return result
         
+        # 5. Try oEmbed as last resort (at least get image)
+        logger.info("[Instagram API] Trying oEmbed...")
+        result = await self._try_instagram_oembed(url)
+        if result.success:
+            logger.info("[Instagram API] Success with oEmbed (image only)")
+            return result
+        
         return InstagramResult(success=False, error="All services failed")
 
     async def download(self, url: str, download_dir: Path, progress_callback=None) -> Tuple[Optional[str], Optional[Path]]:
         """Download video using alternative services"""
-        import requests
         
         if progress_callback:
             progress_callback('status_downloading', 15)
         
         result = await self.get_video_url(url)
         
-        if not result.success or not result.video_url:
+        if not result.success:
+            return None, None
+        
+        # Get the URL to download
+        media_url = result.video_url
+        is_video = result.is_video
+        
+        if not media_url and result.image_urls:
+            media_url = result.image_urls[0]
+            is_video = False
+        
+        if not media_url:
             return None, None
         
         if progress_callback:
             progress_callback('status_downloading', 40)
         
         try:
-            # Download the video
+            # Download the media
             headers = {
                 'User-Agent': self._get_user_agent(),
                 'Referer': 'https://www.instagram.com/',
@@ -199,7 +360,7 @@ class InstagramAPIService:
             
             response = await asyncio.to_thread(
                 requests.get, 
-                result.video_url, 
+                media_url, 
                 headers=headers, 
                 timeout=120,
                 stream=True
@@ -210,8 +371,9 @@ class InstagramAPIService:
                 return None, None
             
             # Generate filename
-            shortcode = self._extract_shortcode(url) or 'video'
-            filename = f"instagram_{shortcode}.mp4"
+            shortcode = self._extract_shortcode(url) or 'media'
+            ext = 'mp4' if is_video else 'jpg'
+            filename = f"instagram_{shortcode}.{ext}"
             file_path = download_dir / filename
             
             download_dir.mkdir(exist_ok=True)
