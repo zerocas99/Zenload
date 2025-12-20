@@ -266,6 +266,11 @@ class DownloadWorker:
                         if is_photo and all_images and len(all_images) > 1:
                             if await self._send_media_group(update, all_images, metadata):
                                 logger.info("Media group send successful!")
+                                
+                                # Send audio after slideshow if available
+                                if audio_url:
+                                    await self._send_audio_auto(update, audio_url, user_id)
+                                
                                 await status_message.delete()
                                 return
                         elif await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):

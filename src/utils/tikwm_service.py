@@ -104,7 +104,9 @@ class TikWmService:
             if images and len(images) > 0:
                 logger.info(f"[TikWm] Photo slideshow detected, {len(images)} images")
                 # Return first image as direct_url, but also return all images
-                return images[0], metadata, False, None, True, images
+                # Include audio_url for slideshows too!
+                audio_url = info.get('music_url')
+                return images[0], metadata, False, audio_url, True, images
         
         # Regular video
         if not info.get('video_url'):

@@ -36,146 +36,164 @@ class InstagramStoriesService:
             return match.group(1)
         return None
 
-    async def _try_storiesig(self, username: str, story_id: str = None) -> Optional[List[Dict]]:
-        """Try storiesig.info API"""
+    async def _try_igram(self, url: str) -> Optional[List[Dict]]:
+        """Try igram.world API"""
         try:
-            # First get user info
-            api_url = f"https://storiesig.info/api/ig/userInfoByUsername/{username}"
+            api_url = "https://api.igram.world/api/convert"
             
             async with aiohttp.ClientSession() as session:
-                async with session.get(
+                async with session.post(
                     api_url,
-                    headers={'User-Agent': self._user_agent},
+                    json={"url": url},
+                    headers={
+                        'User-Agent': self._user_agent,
+                        'Content-Type': 'application/json',
+                        'Origin': 'https://igram.world',
+                        'Referer': 'https://igram.world/'
+                    },
                     timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
                 ) as response:
                     if response.status != 200:
-                        logger.debug(f"[StoriesIG] User info failed: {response.status}")
-                        return None
-                    
-                    user_data = await response.json()
-                    user_id = user_data.get('result', {}).get('user', {}).get('pk')
-                    
-                    if not user_id:
-                        logger.debug("[StoriesIG] Could not get user ID")
-                        return None
-                
-                # Get stories
-                stories_url = f"https://storiesig.info/api/ig/stories/{user_id}"
-                async with session.get(
-                    stories_url,
-                    headers={'User-Agent': self._user_agent},
-                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
-                ) as response:
-                    if response.status != 200:
-                        logger.debug(f"[StoriesIG] Stories fetch failed: {response.status}")
-                        return None
-                    
-                    stories_data = await response.json()
-                    items = stories_data.get('result', [])
-                    
-                    if not items:
-                        logger.debug("[StoriesIG] No stories found")
-                        return None
-                    
-                    stories = []
-                    for item in items:
-                        item_id = str(item.get('pk', ''))
-                        
-                        # If specific story_id requested, filter
-                        if story_id and item_id != story_id:
-                            continue
-                        
-                        media_type = item.get('media_type')  # 1 = photo, 2 = video
-                        
-                        if media_type == 2:  # Video
-                            video_versions = item.get('video_versions', [])
-                            if video_versions:
-                                stories.append({
-                                    'type': 'video',
-                                    'url': video_versions[0].get('url'),
-                                    'id': item_id
-                                })
-                        else:  # Photo
-                            image_versions = item.get('image_versions2', {}).get('candidates', [])
-                            if image_versions:
-                                stories.append({
-                                    'type': 'photo',
-                                    'url': image_versions[0].get('url'),
-                                    'id': item_id
-                                })
-                    
-                    return stories if stories else None
-                    
-        except Exception as e:
-            logger.debug(f"[StoriesIG] Error: {e}")
-            return None
-
-    async def _try_anonyig(self, username: str, story_id: str = None) -> Optional[List[Dict]]:
-        """Try AnonyIG API as fallback"""
-        try:
-            api_url = f"https://anonyig.com/api/ig/story?url=https://www.instagram.com/stories/{username}/"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    api_url,
-                    headers={'User-Agent': self._user_agent},
-                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
-                ) as response:
-                    if response.status != 200:
+                        logger.debug(f"[iGram] API failed: {response.status}")
                         return None
                     
                     data = await response.json()
                     items = data.get('result', [])
                     
                     if not items:
+                        logger.debug("[iGram] No results")
                         return None
                     
                     stories = []
                     for item in items:
-                        item_id = str(item.get('pk', ''))
-                        
-                        if story_id and item_id != story_id:
+                        media_url = item.get('url')
+                        if not media_url:
                             continue
                         
-                        if item.get('video_url'):
-                            stories.append({
-                                'type': 'video',
-                                'url': item['video_url'],
-                                'id': item_id
-                            })
-                        elif item.get('image_url'):
-                            stories.append({
-                                'type': 'photo',
-                                'url': item['image_url'],
-                                'id': item_id
-                            })
+                        # Determine type by URL
+                        is_video = '.mp4' in media_url or 'video' in media_url
+                        stories.append({
+                            'type': 'video' if is_video else 'photo',
+                            'url': media_url
+                        })
                     
                     return stories if stories else None
                     
         except Exception as e:
-            logger.debug(f"[AnonyIG] Error: {e}")
+            logger.debug(f"[iGram] Error: {e}")
+            return None
+
+    async def _try_savegram(self, url: str) -> Optional[List[Dict]]:
+        """Try savegram.app API"""
+        try:
+            api_url = "https://savegram.app/api/instagram"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    data={"url": url},
+                    headers={
+                        'User-Agent': self._user_agent,
+                        'Origin': 'https://savegram.app',
+                        'Referer': 'https://savegram.app/'
+                    },
+                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        logger.debug(f"[SaveGram] API failed: {response.status}")
+                        return None
+                    
+                    data = await response.json()
+                    
+                    # Check for media URL in response
+                    media_url = data.get('url') or data.get('video') or data.get('image')
+                    if media_url:
+                        is_video = '.mp4' in media_url or 'video' in str(data.get('type', ''))
+                        return [{
+                            'type': 'video' if is_video else 'photo',
+                            'url': media_url
+                        }]
+                    
+                    return None
+                    
+        except Exception as e:
+            logger.debug(f"[SaveGram] Error: {e}")
+            return None
+
+    async def _try_saveig(self, url: str) -> Optional[List[Dict]]:
+        """Try saveig.net API"""
+        try:
+            api_url = "https://saveig.net/api/ajaxSearch"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    data={
+                        "q": url,
+                        "t": "media",
+                        "lang": "en"
+                    },
+                    headers={
+                        'User-Agent': self._user_agent,
+                        'Origin': 'https://saveig.net',
+                        'Referer': 'https://saveig.net/',
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        logger.debug(f"[SaveIG] API failed: {response.status}")
+                        return None
+                    
+                    data = await response.json()
+                    
+                    if data.get('status') != 'ok':
+                        logger.debug(f"[SaveIG] Status not ok: {data.get('status')}")
+                        return None
+                    
+                    # Parse HTML response to extract URLs
+                    html = data.get('data', '')
+                    
+                    # Find download URLs in HTML
+                    import re
+                    video_urls = re.findall(r'href="([^"]+\.mp4[^"]*)"', html)
+                    image_urls = re.findall(r'href="([^"]+\.jpg[^"]*)"', html)
+                    
+                    stories = []
+                    for vurl in video_urls:
+                        stories.append({'type': 'video', 'url': vurl})
+                    for iurl in image_urls:
+                        if iurl not in [s['url'] for s in stories]:
+                            stories.append({'type': 'photo', 'url': iurl})
+                    
+                    return stories if stories else None
+                    
+        except Exception as e:
+            logger.debug(f"[SaveIG] Error: {e}")
             return None
 
     async def get_stories(self, url: str) -> Optional[List[Dict]]:
         """Get stories from Instagram URL"""
         username = self._extract_username_from_story_url(url)
-        if not username:
-            logger.warning(f"[Stories] Could not extract username from: {url}")
-            return None
-        
         story_id = self._extract_story_id(url)
         logger.info(f"[Stories] Getting stories for @{username}, story_id={story_id}")
         
-        # Try StoriesIG first
-        stories = await self._try_storiesig(username, story_id)
+        # Try iGram first
+        stories = await self._try_igram(url)
         if stories:
-            logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
+            logger.info(f"[Stories] Got {len(stories)} stories from iGram")
             return stories
         
-        # Try AnonyIG as fallback
-        stories = await self._try_anonyig(username, story_id)
+        # Try SaveIG
+        stories = await self._try_saveig(url)
         if stories:
-            logger.info(f"[Stories] Got {len(stories)} stories from AnonyIG")
+            logger.info(f"[Stories] Got {len(stories)} stories from SaveIG")
+            return stories
+        
+        # Try SaveGram
+        stories = await self._try_savegram(url)
+        if stories:
+            logger.info(f"[Stories] Got {len(stories)} stories from SaveGram")
             return stories
         
         logger.warning("[Stories] All services failed")
