@@ -67,7 +67,8 @@ class ZenloadBot:
         self.download_manager = DownloadManager(
             self.localization,
             self.settings_manager,
-            activity_logger=self.activity_logger
+            activity_logger=self.activity_logger,
+            keyboard_builder=self.keyboard_builder
         )
         
         # Initialize handlers

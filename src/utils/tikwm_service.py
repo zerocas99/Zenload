@@ -73,14 +73,14 @@ class TikWmService:
             logger.error(f"[TikWm] Error: {e}")
             return None
     
-    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool]:
+    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str]]:
         """
         Get direct video URL for fast sending
-        Returns: (direct_url, metadata, is_audio)
+        Returns: (direct_url, metadata, is_audio, audio_url)
         """
         info = await self.get_video_info(url)
         if not info or not info.get('video_url'):
-            return None, None, False
+            return None, None, False, None
         
         # Format metadata
         def format_number(num):
@@ -97,8 +97,9 @@ class TikWmService:
         author = info.get('author', '') or info.get('author_id', '')
         
         metadata = f"TikTok | {plays} ▶️ | {likes} ❤️\nby @{author}"
+        audio_url = info.get('music_url')
         
-        return info['video_url'], metadata, False
+        return info['video_url'], metadata, False, audio_url
     
     async def download(
         self, 

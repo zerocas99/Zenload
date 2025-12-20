@@ -20,11 +20,12 @@ logger = logging.getLogger(__name__)
 
 class DownloadWorker:
     """Worker class to handle individual downloads"""
-    def __init__(self, localization, settings_manager, session: aiohttp.ClientSession, activity_logger=None):
+    def __init__(self, localization, settings_manager, session: aiohttp.ClientSession, activity_logger=None, keyboard_builder=None):
         self.localization = localization
         self.settings_manager = settings_manager
         self.session = session
         self.activity_logger = activity_logger
+        self.keyboard_builder = keyboard_builder
         self._status_queue = asyncio.Queue()
         self._stop_event = asyncio.Event()
         self._current_message: Optional[Message] = None
@@ -139,6 +140,39 @@ class DownloadWorker:
             logger.debug(f"Direct URL send failed: {e}")
             return False
 
+    async def _send_audio_auto(self, update: Update, audio_url: str, user_id: int):
+        """Automatically send audio after video (for TikTok music)"""
+        try:
+            # Try sending audio directly via URL
+            await update.effective_message.reply_audio(
+                audio=audio_url,
+                caption="🎵",
+                read_timeout=60,
+                write_timeout=60,
+                connect_timeout=30,
+                pool_timeout=30
+            )
+            logger.info("Auto audio send successful")
+        except Exception as e:
+            logger.debug(f"Auto audio send failed: {e}")
+            # Try downloading and sending
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(audio_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                        if resp.status == 200:
+                            audio_data = await resp.read()
+                            if len(audio_data) > 1000:  # Verify it's not empty
+                                from io import BytesIO
+                                audio_file = BytesIO(audio_data)
+                                audio_file.name = "audio.mp3"
+                                await update.effective_message.reply_audio(
+                                    audio=audio_file,
+                                    caption="🎵"
+                                )
+                                logger.info("Auto audio send via download successful")
+            except Exception as e2:
+                logger.debug(f"Auto audio download failed: {e2}")
+
     async def process_download(self, downloader, url: str, update: Update, status_message: Message, format_id: str = None) -> None:
         """Process content download with error handling and cleanup"""
         user_id = update.effective_user.id
@@ -173,14 +207,27 @@ class DownloadWorker:
             direct_url = None
             is_audio = False
             metadata = None
+            audio_url = None
             
             if hasattr(downloader, 'get_direct_url'):
                 try:
-                    direct_url, metadata, is_audio = await downloader.get_direct_url(url)
+                    result = await downloader.get_direct_url(url)
+                    # Handle both 3-tuple and 4-tuple returns
+                    if len(result) == 4:
+                        direct_url, metadata, is_audio, audio_url = result
+                    else:
+                        direct_url, metadata, is_audio = result
+                        audio_url = None
+                    
                     if direct_url:
                         logger.info(f"Got direct URL, trying fast send...")
                         if await self._try_direct_url_send(update, direct_url, is_audio, metadata):
                             logger.info("Fast direct URL send successful!")
+                            
+                            # Auto-send audio if available (TikTok music)
+                            if audio_url and not is_audio:
+                                await self._send_audio_auto(update, audio_url, user_id)
+                            
                             await status_message.delete()
                             return
                         logger.info("Direct URL send failed, falling back to download...")
@@ -309,12 +356,16 @@ class DownloadWorker:
 
 class DownloadManager:
     """High-performance download manager with optimized concurrency"""
-    def __init__(self, localization, settings_manager, max_concurrent_downloads=50, max_downloads_per_user=5, activity_logger=None):
+    def __init__(self, localization, settings_manager, max_concurrent_downloads=50, max_downloads_per_user=5, activity_logger=None, keyboard_builder=None):
         self.localization = localization
         self.settings_manager = settings_manager
         self.max_concurrent_downloads = max_concurrent_downloads
         self.max_downloads_per_user = max_downloads_per_user
         self.activity_logger = activity_logger
+        self.keyboard_builder = keyboard_builder
+        
+        # Audio URL cache for callback handling
+        self.audio_cache: Dict[int, str] = {}
         
         # Initialize as None, will create when needed
         self.connector = None
@@ -519,14 +570,14 @@ class DownloadManager:
             # Check user's concurrent downloads limit
             if len(self.active_downloads.get(user_id, {})) >= self.max_downloads_per_user:
                 await status_message.edit_text(
-                    DownloadWorker(self.localization, self.settings_manager, self.session, self.activity_logger).get_message(
+                    DownloadWorker(self.localization, self.settings_manager, self.session, self.activity_logger, self.keyboard_builder).get_message(
                         user_id, 'error_too_many_downloads'
                     )
                 )
                 return
             
             # Create worker and queue download
-            worker = DownloadWorker(self.localization, self.settings_manager, self.session, self.activity_logger)
+            worker = DownloadWorker(self.localization, self.settings_manager, self.session, self.activity_logger, self.keyboard_builder)
             priority = len(self.active_downloads.get(user_id, {}))  # Lower number = higher priority
             
             await self.download_queue.put((
