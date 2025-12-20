@@ -63,8 +63,54 @@ class YandexMusicDownloader(BaseDownloader):
         
         raise DownloadError("Could not extract track ID from URL")
 
-    async def _get_track_info_from_page(self, url: str) -> Optional[Dict]:
-        """Get track info by fetching Yandex Music page HTML (no auth required)"""
+    async def _get_track_info_from_api_public(self, track_id: str, album_id: str = None) -> Optional[Dict]:
+        """Get track info from Yandex Music public API (no auth required)"""
+        logger.info(f"[Yandex] Fetching track info from public API: track={track_id}, album={album_id}")
+        
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+            
+            # Use public API endpoint
+            api_url = f"https://api.music.yandex.net/tracks/{track_id}"
+            
+            response = await asyncio.to_thread(requests.get, api_url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('result') and len(data['result']) > 0:
+                    track = data['result'][0]
+                    title = track.get('title', '')
+                    artists = [a.get('name', '') for a in track.get('artists', [])]
+                    artist_str = ', '.join(artists) if artists else ''
+                    
+                    if title and artist_str:
+                        query = f"{artist_str} - {title}"
+                        logger.info(f"[Yandex] Got from API: {query}")
+                        return {'search_query': query, 'title': title, 'artist': artist_str}
+                    elif title:
+                        logger.info(f"[Yandex] Got title from API: {title}")
+                        return {'search_query': title, 'title': title}
+            
+            logger.info(f"[Yandex] Public API request failed: {response.status_code}")
+            
+        except Exception as e:
+            logger.error(f"[Yandex] Public API error: {e}")
+        
+        return None
+
+    async def _get_track_info_from_page(self, url: str, track_id: str = None, album_id: str = None) -> Optional[Dict]:
+        """Get track info by fetching Yandex Music page HTML or API"""
+        
+        # First try public API (more reliable)
+        if track_id:
+            api_result = await self._get_track_info_from_api_public(track_id, album_id)
+            if api_result:
+                return api_result
+        
         logger.info(f"[Yandex] Fetching track info from page: {url}")
         
         try:
@@ -86,11 +132,26 @@ class YandexMusicDownloader(BaseDownloader):
             title = None
             artist = None
             
+            # Try to find JSON data in page (Yandex embeds track data)
+            json_match = re.search(r'"track":\s*(\{[^}]+\})', html)
+            if json_match:
+                try:
+                    import json
+                    track_data = json.loads(json_match.group(1))
+                    title = track_data.get('title')
+                    if title:
+                        logger.info(f"[Yandex] Found title in JSON: {title}")
+                except:
+                    pass
+            
             # Get og:title (track name)
             og_title = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html)
-            if og_title:
-                title = og_title.group(1)
-                logger.info(f"[Yandex] Found og:title: {title}")
+            if og_title and not title:
+                potential_title = og_title.group(1)
+                # Skip default Yandex titles
+                if 'собираем музыку' not in potential_title.lower() and 'яндекс музыка' not in potential_title.lower():
+                    title = potential_title
+                    logger.info(f"[Yandex] Found og:title: {title}")
             
             # Get og:description (format: "Artist • Трек • Year" or "Artist • Альбом • Year")
             og_desc = re.search(r'<meta[^>]+property="og:description"[^>]+content="([^"]+)"', html)
@@ -111,10 +172,14 @@ class YandexMusicDownloader(BaseDownloader):
                 logger.info(f"[Yandex] Using title only: {title}")
                 return {'search_query': title}
             
-            # Fallback: title tag
+            # Fallback: title tag (but skip default titles)
             title_tag = re.search(r'<title>([^<]+)</title>', html)
             if title_tag:
                 title = title_tag.group(1)
+                # Skip default Yandex Music titles
+                if 'собираем музыку' in title.lower() or title.lower().startswith('яндекс музыка'):
+                    logger.info(f"[Yandex] Skipping default title: {title}")
+                    return None
                 title = re.sub(r'\s*[-—|]\s*(слушать|listen).*$', '', title, flags=re.IGNORECASE)
                 logger.info(f"[Yandex] Found title tag: {title}")
                 return {'search_query': title}
@@ -254,14 +319,18 @@ class YandexMusicDownloader(BaseDownloader):
                 except Exception as e:
                     logger.info(f"[Yandex] API download failed: {e}, trying YouTube fallback")
 
-            # YouTube fallback - first try to get track info from page
+            # YouTube fallback - first try to get track info from page/API
             self.update_progress('status_downloading', 20)
             
             # Clean URL for fetching
             clean_url = url.split('?')[0]  # Remove query params
             
-            # Try to get track info from page
-            page_info = await self._get_track_info_from_page(clean_url)
+            # Extract track_id and album_id for API call
+            track_only_id = track_id.split(':')[0] if ':' in track_id else track_id
+            album_only_id = track_id.split(':')[1] if ':' in track_id else None
+            
+            # Try to get track info from page/API
+            page_info = await self._get_track_info_from_page(clean_url, track_only_id, album_only_id)
             search_query = None
             
             if page_info and page_info.get('search_query'):
