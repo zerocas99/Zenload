@@ -178,6 +178,8 @@ class CobaltService:
             "videoQuality": kwargs.get("video_quality", "1080"),
             "audioFormat": kwargs.get("audio_format", "mp3"),
             "downloadMode": kwargs.get("download_mode", "auto"),
+            # Force proxy mode to avoid tunnel issues on Railway
+            "filenameStyle": "pretty",
         }
         
         # Add optional fields only if needed
