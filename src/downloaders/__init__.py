@@ -5,7 +5,6 @@ from .tiktok import TikTokDownloader
 from .pinterest import PinterestDownloader
 from .youtube import YouTubeDownloader
 from .soundcloud import SoundcloudDownloader
-from .vk import VKDownloader
 
 
 class DownloaderFactory:
@@ -16,8 +15,7 @@ class DownloaderFactory:
         TikTokDownloader,
         PinterestDownloader,
         YouTubeDownloader,
-        SoundcloudDownloader,
-        VKDownloader
+        SoundcloudDownloader
     ]
 
     @classmethod
