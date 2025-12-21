@@ -175,9 +175,12 @@ class CobaltPlatformDownloader(BaseDownloader):
         if format_id and format_id != 'best':
             quality = format_id.replace('p', '')
         
-        # Try Cobalt
+        # Try Cobalt with timeout
         try:
-            result = await cobalt.request(url, video_quality=quality)
+            result = await asyncio.wait_for(
+                cobalt.request(url, video_quality=quality),
+                timeout=30
+            )
             
             if result.success:
                 download_url = result.url
@@ -226,7 +229,10 @@ class CobaltPlatformDownloader(BaseDownloader):
             error_msg = result.error or "Unknown error"
             logger.error(f"[{platform_name}] Cobalt failed: {error_msg}")
             raise DownloadError(f"Ошибка загрузки с {platform_name}: {error_msg}")
-            
+        
+        except asyncio.TimeoutError:
+            logger.error(f"[{platform_name}] Timeout - Cobalt took too long")
+            raise DownloadError(f"Таймаут загрузки с {platform_name}")
         except DownloadError:
             raise
         except Exception as e:
