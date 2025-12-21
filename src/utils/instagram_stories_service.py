@@ -510,54 +510,27 @@ class InstagramStoriesService:
             return None
 
     async def get_stories(self, url: str) -> Optional[List[Dict]]:
-        """Get stories from Instagram URL"""
+        """Get ALL stories from Instagram URL (ignores specific story_id)"""
         username = self._extract_username_from_story_url(url)
-        story_id = self._extract_story_id(url)
-        logger.info(f"[Stories] Getting stories for @{username}, story_id={story_id}")
+        logger.info(f"[Stories] Getting ALL stories for @{username}")
         
-        # If we have specific story_id, try services that can handle specific stories
-        if story_id:
-            # Try FastDL first - it might handle specific stories better
-            logger.info(f"[Stories] Trying FastDL for specific story_id={story_id}")
-            stories = await self._try_fastdl(url)
-            if stories:
-                logger.info(f"[Stories] Got {len(stories)} stories from FastDL")
-                return stories
-            
-            # Try iGram
-            logger.info(f"[Stories] Trying iGram for specific story_id={story_id}")
-            stories = await self._try_igram(url)
-            if stories:
-                logger.info(f"[Stories] Got {len(stories)} stories from iGram")
-                return stories
-            
-            # Try StoriesIG
-            logger.info(f"[Stories] Trying StoriesIG for specific story_id={story_id}")
-            stories = await self._try_storiesig(username, story_id)
-            if stories:
-                logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
-                return stories
-            logger.info("[Stories] StoriesIG failed or returned None")
-        
-        # Try JS API (uses snapsave - good for all stories but has ID matching issues)
-        stories = await self._try_js_api(url, story_id)
+        # Try JS API first (most reliable for getting all stories)
+        stories = await self._try_js_api(url, story_id=None)
         if stories:
             logger.info(f"[Stories] Got {len(stories)} stories from JS API")
             return stories
         
-        # Try StoriesIG (if not tried above)
-        if not story_id:
-            stories = await self._try_storiesig(username, story_id)
-            if stories:
-                logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
-                return stories
+        # Try StoriesIG
+        stories = await self._try_storiesig(username, story_id=None)
+        if stories:
+            logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
+            return stories
         
-        # Try iGram (if not tried above)
-        if not story_id:
-            stories = await self._try_igram(url)
-            if stories:
-                logger.info(f"[Stories] Got {len(stories)} stories from iGram")
-                return stories
+        # Try iGram
+        stories = await self._try_igram(url)
+        if stories:
+            logger.info(f"[Stories] Got {len(stories)} stories from iGram")
+            return stories
         
         # Try SaveIG
         stories = await self._try_saveig(url)

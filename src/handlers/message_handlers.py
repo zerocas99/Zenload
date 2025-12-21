@@ -227,22 +227,16 @@ class MessageHandlers:
                     pass
                 status_message = None
             
-            # Check if this is Instagram story with specific ID - handle specially
+            # Check if this is Instagram story - always download all stories
             is_instagram_story = (
                 hasattr(downloader, '_is_story_url') and 
-                hasattr(downloader, '_has_specific_story_id') and
-                downloader._is_story_url(url) and 
-                downloader._has_specific_story_id(url)
+                downloader._is_story_url(url)
             )
             
             if is_instagram_story:
-                # For Instagram stories with specific ID, try Cobalt first then fallback
+                # For Instagram stories - always download all stories from user
                 download_task = asyncio.create_task(
-                    self._download_instagram_story_with_fallback(
-                        downloader, 
-                        url, 
-                        update
-                    )
+                    self._process_all_stories(url, update, downloader)
                 )
             else:
                 # Normal download
