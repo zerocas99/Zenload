@@ -246,7 +246,7 @@ class InstagramStoriesService:
                     
                     # Log for debugging
                     if story_id:
-                        logger.info(f"[Stories] Item {idx}: url_story_id={url_story_id}, thumb_story_id={thumb_story_id}")
+                        logger.info(f"[Stories] Item {idx}: url_story_id={url_story_id}, thumb_story_id={thumb_story_id}, url={url[:60]}...")
         
         # Second pass: find matching story by ID
         if story_id:
@@ -276,23 +276,25 @@ class InstagramStoriesService:
                         'matched': True
                     }]
             
-            # Priority 3: Match by thumbnail story ID ONLY if thumbnail and main URL have same story ID
-            # This prevents the bug where thumbnail points to different story than main URL
+            # Priority 3: Match by thumbnail story ID - but use the SAME item's URL
+            # The API returns multiple quality variants, thumbnail ID identifies the story
             for item_data in all_items_data:
                 if item_data['thumb_story_id'] == story_id:
-                    # Verify that main URL also belongs to this story (or has no ID)
-                    if item_data['url_story_id'] is None or item_data['url_story_id'] == story_id:
-                        logger.info(f"[Stories] Found story_id via thumbnail JWT at index {item_data['idx']} (verified)")
-                        original_url = item_data['original_url'] or item_data['thumb_original']
-                        is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower())
-                        return [{
-                            'type': 'video' if is_video else 'photo',
-                            'url': item_data['url'],
-                            'index': item_data['idx'],
-                            'matched': True
-                        }]
-                    else:
-                        logger.warning(f"[Stories] Thumbnail story_id matches but main URL has different ID: {item_data['url_story_id']}")
+                    logger.info(f"[Stories] Found story_id via thumbnail JWT at index {item_data['idx']}")
+                    logger.info(f"[Stories] Using URL: {item_data['url'][:100]}...")
+                    logger.info(f"[Stories] Original URL decoded: {item_data['original_url'][:100] if item_data['original_url'] else 'None'}...")
+                    # Use this item's URL directly - it should be the video for this story
+                    original_url = item_data['original_url'] or item_data['thumb_original']
+                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower())
+                    # Also check the URL itself for video indicators
+                    if not is_video:
+                        is_video = '/v/' in item_data['url'] or 'video' in item_data['url'].lower()
+                    return [{
+                        'type': 'video' if is_video else 'photo',
+                        'url': item_data['url'],
+                        'index': item_data['idx'],
+                        'matched': True
+                    }]
             
             # Priority 4: Direct string search in raw item
             for idx, item in enumerate(data):
@@ -313,7 +315,14 @@ class InstagramStoriesService:
             logger.warning(f"[Stories] Could not find story_id {story_id} in {len(all_items_data)} items")
         
         # Build items list for return (when no specific story_id or not found)
+        # Group by thumb_story_id to avoid duplicates (quality variants)
+        seen_story_ids = set()
         for item_data in all_items_data:
+            story_key = item_data['thumb_story_id'] or item_data['url_story_id'] or item_data['idx']
+            if story_key in seen_story_ids:
+                continue
+            seen_story_ids.add(story_key)
+            
             original_url = item_data['original_url']
             is_video = False
             if original_url:
