@@ -4,6 +4,7 @@ YouTube JS Fallback - использует Node.js сервис с ytdl-core-enh
 """
 
 import aiohttp
+import asyncio
 import logging
 import os
 from typing import Optional, Dict, Any
@@ -33,14 +34,27 @@ class YouTubeJSFallback:
     async def get_video_url(self, url: str, quality: str = "highest") -> YouTubeJSResult:
         """Получить видео через Node.js сервис (стриминг)"""
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
+            logger.info(f"[YouTubeJS] Starting stream request for video...")
+            timeout = aiohttp.ClientTimeout(total=600, connect=30)  # 10 минут на скачивание
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 params = {"url": url, "type": "video"}
                 async with session.get(f"{self.base_url}/youtube/stream", params=params) as resp:
+                    logger.info(f"[YouTubeJS] Response status: {resp.status}")
+                    
                     if resp.status == 200:
-                        # Читаем весь контент
-                        content = await resp.read()
+                        # Читаем контент чанками для отслеживания прогресса
+                        chunks = []
+                        total_size = 0
+                        async for chunk in resp.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                            chunks.append(chunk)
+                            total_size += len(chunk)
+                            if total_size % (5 * 1024 * 1024) == 0:  # Логируем каждые 5MB
+                                logger.info(f"[YouTubeJS] Downloaded {total_size // (1024*1024)}MB...")
+                        
+                        content = b''.join(chunks)
+                        logger.info(f"[YouTubeJS] Total downloaded: {len(content)} bytes")
+                        
                         if len(content) > 10000:  # Минимум 10KB
-                            # Получаем имя файла из заголовка
                             content_disp = resp.headers.get('Content-Disposition', '')
                             filename = None
                             if 'filename=' in content_disp:
@@ -48,10 +62,10 @@ class YouTubeJSFallback:
                             
                             return YouTubeJSResult(
                                 success=True,
-                                url=None,  # URL не нужен, у нас есть контент
+                                url=None,
                                 title=filename,
                                 container='mp4',
-                                content=content  # Добавляем контент
+                                content=content
                             )
                         else:
                             return YouTubeJSResult(
@@ -64,9 +78,14 @@ class YouTubeJSFallback:
                         data = await resp.json()
                         error = data.get("error", f"HTTP {resp.status}")
                     except:
-                        error = f"HTTP {resp.status}"
+                        error_text = await resp.text()
+                        error = f"HTTP {resp.status}: {error_text[:200]}"
+                    logger.error(f"[YouTubeJS] Error: {error}")
                     return YouTubeJSResult(success=False, error=error)
                     
+        except asyncio.TimeoutError:
+            logger.error("[YouTubeJS] Timeout error")
+            return YouTubeJSResult(success=False, error="Timeout - video too large or slow connection")
         except aiohttp.ClientError as e:
             logger.error(f"[YouTubeJS] Connection error: {e}")
             return YouTubeJSResult(success=False, error=f"Connection error: {e}")
@@ -77,12 +96,24 @@ class YouTubeJSFallback:
     async def get_audio_url(self, url: str) -> YouTubeJSResult:
         """Получить аудио через Node.js сервис (стриминг)"""
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
+            logger.info(f"[YouTubeJS] Starting stream request for audio...")
+            timeout = aiohttp.ClientTimeout(total=300, connect=30)  # 5 минут для аудио
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 params = {"url": url, "type": "audio"}
                 async with session.get(f"{self.base_url}/youtube/stream", params=params) as resp:
+                    logger.info(f"[YouTubeJS] Audio response status: {resp.status}")
+                    
                     if resp.status == 200:
-                        content = await resp.read()
-                        if len(content) > 5000:  # Минимум 5KB для аудио
+                        chunks = []
+                        total_size = 0
+                        async for chunk in resp.content.iter_chunked(512 * 1024):  # 512KB chunks
+                            chunks.append(chunk)
+                            total_size += len(chunk)
+                        
+                        content = b''.join(chunks)
+                        logger.info(f"[YouTubeJS] Audio total: {len(content)} bytes")
+                        
+                        if len(content) > 5000:
                             content_disp = resp.headers.get('Content-Disposition', '')
                             filename = None
                             if 'filename=' in content_disp:
@@ -106,8 +137,12 @@ class YouTubeJSFallback:
                         error = data.get("error", f"HTTP {resp.status}")
                     except:
                         error = f"HTTP {resp.status}"
+                    logger.error(f"[YouTubeJS] Audio error: {error}")
                     return YouTubeJSResult(success=False, error=error)
                     
+        except asyncio.TimeoutError:
+            logger.error("[YouTubeJS] Audio timeout")
+            return YouTubeJSResult(success=False, error="Timeout")
         except aiohttp.ClientError as e:
             logger.error(f"[YouTubeJS] Connection error: {e}")
             return YouTubeJSResult(success=False, error=f"Connection error: {e}")
