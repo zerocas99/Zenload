@@ -16,6 +16,10 @@ class YouTubeDownloader(BaseDownloader):
         super().__init__()
         self.cookie_file = Path(__file__).parent.parent.parent / "cookies" / "youtube.txt"
         self._video_info_cache = {}
+        
+        # Create cookies from environment variable if available
+        self._setup_cookies_from_env()
+        
         # Import Cobalt service
         try:
             from ..utils.cobalt_service import cobalt
@@ -36,6 +40,19 @@ class YouTubeDownloader(BaseDownloader):
         # except:
         #     self._piped = None
         self._piped = None  # Disabled - most instances are down
+
+    def _setup_cookies_from_env(self):
+        """Create cookies file from YOUTUBE_COOKIES environment variable"""
+        cookies_content = os.getenv('YOUTUBE_COOKIES')
+        if cookies_content:
+            try:
+                cookies_dir = self.cookie_file.parent
+                cookies_dir.mkdir(exist_ok=True)
+                with open(self.cookie_file, 'w') as f:
+                    f.write(cookies_content)
+                logger.info(f"[YouTube] Cookies loaded from environment variable")
+            except Exception as e:
+                logger.warning(f"[YouTube] Failed to write cookies: {e}")
 
     def platform_id(self) -> str:
         return 'youtube'
