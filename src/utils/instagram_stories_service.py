@@ -495,10 +495,12 @@ class InstagramStoriesService:
         
         # If we have specific story_id, try StoriesIG first (returns proper IDs)
         if story_id:
+            logger.info(f"[Stories] Trying StoriesIG first for specific story_id={story_id}")
             stories = await self._try_storiesig(username, story_id)
             if stories:
                 logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
                 return stories
+            logger.info("[Stories] StoriesIG failed or returned None")
         
         # Try JS API (uses snapsave - good for all stories but has ID matching issues)
         stories = await self._try_js_api(url, story_id)
@@ -543,10 +545,12 @@ class InstagramStoriesService:
     async def _try_storiesig(self, username: str, story_id: str = None) -> Optional[List[Dict]]:
         """Try storiesig.info API"""
         if not username:
+            logger.debug("[StoriesIG] No username provided")
             return None
         
         try:
             api_url = f"https://storiesig.info/api/ig/story?url=https://www.instagram.com/stories/{username}/"
+            logger.info(f"[StoriesIG] Requesting: {api_url}")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -557,14 +561,16 @@ class InstagramStoriesService:
                     },
                     timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
                 ) as response:
+                    logger.info(f"[StoriesIG] Response status: {response.status}")
                     if response.status != 200:
-                        logger.debug(f"[StoriesIG] API failed: {response.status}")
+                        logger.warning(f"[StoriesIG] API failed: {response.status}")
                         return None
                     
                     data = await response.json()
+                    logger.info(f"[StoriesIG] Response data keys: {list(data.keys()) if isinstance(data, dict) else 'not dict'}")
                     
                     if not data.get('result'):
-                        logger.debug("[StoriesIG] No result in response")
+                        logger.warning("[StoriesIG] No result in response")
                         return None
                     
                     stories = []
@@ -587,6 +593,8 @@ class InstagramStoriesService:
                             
                             stories.append(story_item)
                     
+                    logger.info(f"[StoriesIG] Found {len(stories)} stories total")
+                    
                     # If we were looking for specific story but didn't find it
                     if story_id and stories:
                         logger.warning(f"[StoriesIG] Specific story {story_id} not found in {len(stories)} stories")
@@ -596,7 +604,7 @@ class InstagramStoriesService:
                     return stories if stories else None
                     
         except Exception as e:
-            logger.debug(f"[StoriesIG] Error: {e}")
+            logger.warning(f"[StoriesIG] Error: {e}")
             return None
     
     async def _try_instafinsta(self, url: str) -> Optional[List[Dict]]:
