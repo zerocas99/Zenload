@@ -7,7 +7,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "⚡ ZenLoad\n\n"
             "Скачивай видео и музыку одной ссылкой\n\n"
             "📱 Instagram · TikTok · Pinterest\n"
-            "🎵 Yandex Music · SoundCloud\n\n"
+            "🎬 YouTube · SoundCloud\n\n"
             "Просто отправь ссылку →\n\n"
             "👨‍💻 Dev: @zerob1ade"
         ),
@@ -40,8 +40,8 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "✅ Поддерживаются:\n"
             "• Instagram\n"
             "• TikTok\n"
+            "• YouTube\n"
             "• Pinterest\n"
-            "• Yandex Music\n"
             "• SoundCloud"
         ),
         'settings_menu': (
@@ -120,7 +120,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "⚡ ZenLoad\n\n"
             "Download videos & music with one link\n\n"
             "📱 Instagram · TikTok · Pinterest\n"
-            "🎵 Yandex Music · SoundCloud\n\n"
+            "🎬 YouTube · SoundCloud\n\n"
             "Just send a link →\n\n"
             "👨‍💻 Dev: @zerob1ade"
         ),
@@ -153,8 +153,8 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "✅ Supported:\n"
             "• Instagram\n"
             "• TikTok\n"
+            "• YouTube\n"
             "• Pinterest\n"
-            "• Yandex Music\n"
             "• SoundCloud"
         ),
         'settings_menu': (

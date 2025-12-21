@@ -96,6 +96,14 @@ class MessageHandlers:
 
         return False
 
+    def _is_youtube_url(self, url: str) -> bool:
+        """Check if URL is from YouTube"""
+        youtube_patterns = [
+            'youtube.com', 'youtu.be', 'youtube.com/shorts',
+            'youtube.com/watch', 'youtube.com/v/', 'youtube.com/embed/'
+        ]
+        return any(pattern in url.lower() for pattern in youtube_patterns)
+
     async def _process_url(self, url: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Process URL from message or command"""
         user_id = update.effective_user.id
@@ -115,93 +123,101 @@ class MessageHandlers:
                 )
             return
 
+        # Check if this is YouTube - only YouTube gets quality selection
+        is_youtube = self._is_youtube_url(url)
+        
         # Create a placeholder message (will be deleted immediately or used for quality selection)
         status_message = None
-        try:
-            status_message = await update.message.reply_text("⏳")
-        except Exception:
+        if is_youtube:
             try:
-                status_message = await update.effective_chat.send_message("⏳")
-            except:
-                pass
+                status_message = await update.message.reply_text("⏳")
+            except Exception:
+                try:
+                    status_message = await update.effective_chat.send_message("⏳")
+                except:
+                    pass
 
         try:
-            # Get available formats
-            formats = await downloader.get_formats(url)
-            
-            if formats:
-                # Store URL in context for callback
-                if not context.user_data:
-                    context.user_data.clear()
-                context.user_data['pending_url'] = url
+            # Only get formats for YouTube
+            if is_youtube:
+                formats = await downloader.get_formats(url)
+                
+                if formats:
+                    # Store URL in context for callback
+                    if not context.user_data:
+                        context.user_data.clear()
+                    context.user_data['pending_url'] = url
 
-                # Get user settings
-                settings = self.settings_manager.get_settings(user_id)
-                
-                # If default quality is set and not 'ask', start download
-                if settings.default_quality != 'ask':
-                    # Delete status message immediately - no need to show it
-                    if status_message:
-                        try:
-                            await status_message.delete()
-                        except:
-                            pass
-                        status_message = None
+                    # Get user settings
+                    settings = self.settings_manager.get_settings(user_id)
                     
-                    # Create download task without status message
-                    download_task = asyncio.create_task(
-                        self.download_manager.process_download(
-                            downloader, 
-                            url, 
-                            update, 
-                            None,  # No status message
-                            settings.default_quality
+                    # If default quality is set and not 'ask', start download
+                    if settings.default_quality != 'ask':
+                        # Delete status message immediately - no need to show it
+                        if status_message:
+                            try:
+                                await status_message.delete()
+                            except:
+                                pass
+                            status_message = None
+                        
+                        # Create download task without status message
+                        download_task = asyncio.create_task(
+                            self.download_manager.process_download(
+                                downloader, 
+                                url, 
+                                update, 
+                                None,  # No status message
+                                settings.default_quality
+                            )
                         )
-                    )
+                        
+                        # Store task reference
+                        task_key = f"{user_id}:{url}"
+                        self._download_tasks[task_key] = download_task
+                        
+                        # Clean up task when done
+                        download_task.add_done_callback(
+                            lambda t: self._download_tasks.pop(task_key, None)
+                        )
+                        return
                     
-                    # Store task reference
-                    task_key = f"{user_id}:{url}"
-                    self._download_tasks[task_key] = download_task
-                    
-                    # Clean up task when done
-                    download_task.add_done_callback(
-                        lambda t: self._download_tasks.pop(task_key, None)
-                    )
+                    # Show quality selection keyboard for YouTube
+                    if status_message:
+                        await status_message.edit_text(
+                            self.get_message(user_id, 'select_quality'),
+                            reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
+                        )
                     return
-                
-                # Show quality selection keyboard (use status_message for this)
-                if status_message:
-                    await status_message.edit_text(
-                        self.get_message(user_id, 'select_quality'),
-                        reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
-                    )
-            else:
-                # Delete status message - no need to show it
-                if status_message:
-                    try:
-                        await status_message.delete()
-                    except:
-                        pass
-                    status_message = None
-                
-                # If no formats available, download with default settings
-                download_task = asyncio.create_task(
-                    self.download_manager.process_download(
-                        downloader, 
-                        url, 
-                        update, 
-                        None  # No status message
-                    )
+            
+            # For non-YouTube platforms - download immediately with best quality
+            # Delete status message if exists
+            if status_message:
+                try:
+                    await status_message.delete()
+                except:
+                    pass
+                status_message = None
+            
+            # Download with best quality (no format selection)
+            download_task = asyncio.create_task(
+                self.download_manager.process_download(
+                    downloader, 
+                    url, 
+                    update, 
+                    None,  # No status message
+                    'best'  # Always best quality for non-YouTube
                 )
-                
-                # Store task reference
-                task_key = f"{user_id}:{url}"
-                self._download_tasks[task_key] = download_task
-                
-                # Clean up task when done
-                download_task.add_done_callback(
-                    lambda t: self._download_tasks.pop(task_key, None)
-                )
+            )
+            
+            # Store task reference
+            task_key = f"{user_id}:{url}"
+            self._download_tasks[task_key] = download_task
+            
+            # Clean up task when done
+            download_task.add_done_callback(
+                lambda t: self._download_tasks.pop(task_key, None)
+            )
 
         except Exception as e:
             try:
@@ -213,5 +229,9 @@ class MessageHandlers:
                     self.get_message(user_id, 'error_occurred')
                 )
             logger.error(f"Unexpected error processing {url}: {e}")
-            await status_message.delete()
+            if status_message:
+                try:
+                    await status_message.delete()
+                except:
+                    pass
 
