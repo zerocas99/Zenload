@@ -271,19 +271,21 @@ class MessageHandlers:
                 'best'
             )
         except DownloadError as e:
-            if str(e) == "FALLBACK_TO_ALL_STORIES":
+            error_msg = str(e)
+            if error_msg == "FALLBACK_TO_ALL_STORIES" or "FALLBACK_TO_ALL_STORIES" in error_msg:
                 # Fallback to downloading all stories
                 logger.info(f"Falling back to all stories for {url}")
                 await self._process_all_stories(url, update, downloader)
             else:
-                raise
+                # Re-raise other errors - they're already handled by download_manager
+                pass
         except Exception as e:
+            error_msg = str(e)
             # Check if it's the fallback error wrapped
-            if "FALLBACK_TO_ALL_STORIES" in str(e):
+            if "FALLBACK_TO_ALL_STORIES" in error_msg:
                 logger.info(f"Falling back to all stories for {url}")
                 await self._process_all_stories(url, update, downloader)
-            else:
-                raise
+            # Other exceptions are already handled by download_manager
 
     async def _process_all_stories(self, url: str, update: Update, downloader):
         """Process all Instagram stories from a user"""
