@@ -81,34 +81,59 @@ class KeyboardBuilder:
         return InlineKeyboardMarkup(keyboard)
 
     def build_format_selection_keyboard(self, user_id: int, formats: list, chat_id: Optional[int] = None, is_admin: bool = False) -> InlineKeyboardMarkup:
-        """Build format selection keyboard for YouTube downloads - compact design"""
+        """Build format selection keyboard for video downloads - shows all available qualities"""
         context = f":{chat_id}" if chat_id and chat_id < 0 else ""
-        
-        # Create row with video quality buttons (720p, 1080p side by side)
-        video_buttons = []
-        
-        # Find 720p and 1080p formats
-        has_720 = any(f['quality'] == '720p' for f in formats)
-        has_1080 = any(f['quality'] == '1080p' for f in formats)
-        
-        if has_720:
-            video_buttons.append(InlineKeyboardButton(
-                "🎬 720p",
-                callback_data=f"quality:720{context}"
-            ))
-        
-        if has_1080:
-            # Add hourglass emoji if 1080p (takes longer)
-            video_buttons.append(InlineKeyboardButton(
-                "🎬 1080p (⏳)",
-                callback_data=f"quality:1080{context}"
-            ))
         
         keyboard = []
         
-        # Add video buttons row
-        if video_buttons:
-            keyboard.append(video_buttons)
+        # Get unique qualities sorted by resolution (highest first)
+        qualities = []
+        for f in formats:
+            q = f.get('quality', '')
+            if q and q not in [x[0] for x in qualities]:
+                # Extract numeric value for sorting
+                num = ''.join(filter(str.isdigit, q))
+                qualities.append((q, int(num) if num else 0))
+        
+        # Sort by resolution (highest first)
+        qualities.sort(key=lambda x: x[1], reverse=True)
+        
+        # Create buttons in rows of 2
+        row = []
+        for quality, num in qualities:
+            # Skip very low qualities
+            if num < 240:
+                continue
+            
+            # Add warning for high quality (large files)
+            if num >= 1080:
+                label = f"🎬 {quality} (⏳)"
+            else:
+                label = f"🎬 {quality}"
+            
+            # Extract just the number for callback
+            callback_value = str(num) if num else quality.replace('p', '')
+            
+            row.append(InlineKeyboardButton(
+                label,
+                callback_data=f"quality:{callback_value}{context}"
+            ))
+            
+            # 2 buttons per row
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        
+        # Add remaining buttons
+        if row:
+            keyboard.append(row)
+        
+        # If no quality buttons, add default
+        if not keyboard:
+            keyboard.append([InlineKeyboardButton(
+                "🎬 720p",
+                callback_data=f"quality:720{context}"
+            )])
         
         # Add audio button on separate row
         keyboard.append([InlineKeyboardButton(

@@ -135,21 +135,24 @@ class VKDownloader(BaseDownloader):
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
         """Download video - Cobalt first, yt-dlp fallback"""
-        logger.info(f"[VK] Downloading: {url}")
+        logger.info(f"[VK] Downloading: {url}, format_id={format_id}")
         self.update_progress('status_downloading', 0)
         
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
         processed_url = self.preprocess_url(url)
         
-        # === 1. Try Cobalt first ===
-        if self._cobalt:
+        # Check if audio only requested
+        is_audio = format_id == 'audio'
+        
+        # === 1. Try Cobalt first (only for video, not audio) ===
+        if self._cobalt and not is_audio:
             try:
                 logger.info("[VK] Trying Cobalt...")
                 self.update_progress('status_downloading', 10)
                 
                 # Default to 720p to avoid huge files
-                quality = format_id if format_id and format_id != 'best' else "720"
+                quality = format_id if format_id and format_id not in ['best', 'audio'] else "720"
                 result = await self._cobalt.request(processed_url, video_quality=quality)
                 
                 if result.success and result.url:
@@ -186,11 +189,18 @@ class VKDownloader(BaseDownloader):
             video_id = self._extract_video_id(processed_url)
             temp_filename = f"vk_{video_id or os.urandom(4).hex()}"
             
-            # Format selection - default to 720p max to avoid huge files
-            if format_id and format_id != 'best':
-                # User selected specific quality
+            # Format selection
+            if is_audio:
+                # Audio only
+                format_str = 'bestaudio/best'
+                logger.info("[VK] Downloading audio only")
+            elif format_id and format_id not in ['best', 'audio']:
+                # User selected specific quality (e.g., "720", "1080", "480")
                 height = format_id.replace('p', '') if format_id.endswith('p') else format_id
-                format_str = f'best[height<={height}][ext=mp4]/best[height<={height}]/best[height<=720]'
+                if height.isdigit():
+                    format_str = f'best[height<={height}][ext=mp4]/best[height<={height}]/best[height<=720]'
+                else:
+                    format_str = 'best[height<=720][ext=mp4]/best[height<=720]/best'
             else:
                 # Default: max 720p to avoid 5GB files
                 format_str = 'best[height<=720][ext=mp4]/best[height<=720]/best[height<=480]'
