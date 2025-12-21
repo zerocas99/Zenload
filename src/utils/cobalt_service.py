@@ -30,20 +30,20 @@ INSTANCES_CACHE_TTL = 3600  # 1 hour
 OFFICIAL_API = "https://api.cobalt.tools/"
 OFFICIAL_TOKEN = os.getenv("COBALT_API_TOKEN", "")
 
-# Fallback instances - ORDERED BY YOUTUBE SUPPORT
+# Fallback instances - ORDERED BY YOUTUBE SUPPORT (updated 22.12.2025)
 # Instances that support YouTube should be first!
 YOUTUBE_INSTANCES = [
-    "https://cobalt-api.meowing.de/",  # YouTube: true, score: 96
-    "https://capi.3kh0.net/",           # YouTube: true, score: 76
+    "https://cobalt-backend.canine.tools/",  # YouTube: true, score: 96
+    "https://cobalt-api.meowing.de/",         # YouTube: true, score: 96
+    "https://capi.3kh0.net/",                 # YouTube: true, score: 76
 ]
 
-# Instances that DON'T support YouTube (for other platforms)
+# Instances that DON'T support YouTube (for other platforms like TikTok, Instagram)
 OTHER_INSTANCES = [
-    "https://kityune.imput.net/",
-    "https://blossom.imput.net/",
-    "https://nachos.imput.net/",
-    "https://sunny.imput.net/",
-    "https://cobalt-backend.canine.tools/",  # YouTube: error.api.youtube.login
+    "https://kityune.imput.net/",    # YT: false, score: 76
+    "https://blossom.imput.net/",    # YT: false, score: 76
+    "https://nachos.imput.net/",     # YT: false, score: 72
+    "https://sunny.imput.net/",      # YT: false, score: 72
 ]
 
 FALLBACK_INSTANCES = YOUTUBE_INSTANCES + OTHER_INSTANCES
