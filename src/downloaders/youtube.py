@@ -28,6 +28,12 @@ class YouTubeDownloader(BaseDownloader):
             self._youtube_js = youtube_js
         except:
             self._youtube_js = None
+        # Import Piped fallback
+        try:
+            from ..utils.piped_fallback import piped
+            self._piped = piped
+        except:
+            self._piped = None
 
     def platform_id(self) -> str:
         return 'youtube'
@@ -180,7 +186,39 @@ class YouTubeDownloader(BaseDownloader):
                             logger.info(f"[YouTube] JS fallback download completed: {file_path}")
                             return "", file_path
                 except Exception as e:
-                    logger.warning(f"[YouTube] JS fallback failed: {e}, trying yt-dlp...")
+                    logger.warning(f"[YouTube] JS fallback failed: {e}, trying Piped...")
+            
+            # Try Piped API
+            if self._piped:
+                try:
+                    logger.info("[YouTube] Trying Piped API...")
+                    quality = format_id if format_id and format_id != 'best' else "720"
+                    result = await self._piped.get_video_url(processed_url, quality)
+                    
+                    if result.success and result.url:
+                        logger.info("[YouTube] Piped success, downloading...")
+                        self.update_progress('status_downloading', 30)
+                        
+                        import requests
+                        response = await asyncio.to_thread(
+                            requests.get, result.url,
+                            headers={'User-Agent': 'Mozilla/5.0'},
+                            timeout=300
+                        )
+                        
+                        if response.status_code == 200:
+                            video_id = processed_url.split('v=')[-1].split('&')[0] if 'v=' in processed_url else 'video'
+                            filename = f"{video_id}.mp4"
+                            file_path = download_dir / filename
+                            
+                            with open(file_path, 'wb') as f:
+                                f.write(response.content)
+                            
+                            self.update_progress('status_downloading', 100)
+                            logger.info(f"[YouTube] Piped download completed: {file_path}")
+                            return "", file_path
+                except Exception as e:
+                    logger.warning(f"[YouTube] Piped failed: {e}, trying yt-dlp...")
             
             # Fallback to yt-dlp
             return await self._download_with_ytdlp(processed_url, download_dir, format_id)
@@ -298,6 +336,33 @@ class YouTubeDownloader(BaseDownloader):
                 except Exception as e:
                     logger.warning(f"[YouTube] JS fallback audio failed: {e}")
             
+            # Try Piped API for audio
+            if self._piped:
+                try:
+                    logger.info("[YouTube] Trying Piped for audio...")
+                    result = await self._piped.get_audio_url(url)
+                    
+                    if result.success and result.url:
+                        import requests
+                        response = await asyncio.to_thread(
+                            requests.get, result.url,
+                            headers={'User-Agent': 'Mozilla/5.0'},
+                            timeout=180
+                        )
+                        
+                        if response.status_code == 200:
+                            video_id = url.split('v=')[-1].split('&')[0] if 'v=' in url else 'audio'
+                            filename = f"{video_id}.m4a"
+                            file_path = download_dir / filename
+                            
+                            with open(file_path, 'wb') as f:
+                                f.write(response.content)
+                            
+                            logger.info(f"[YouTube] Piped audio completed: {file_path}")
+                            return "", file_path
+                except Exception as e:
+                    logger.warning(f"[YouTube] Piped audio failed: {e}")
+            
             # Fallback to yt-dlp
             ydl_opts = {
                 'format': 'bestaudio/best',
@@ -399,6 +464,32 @@ class YouTubeDownloader(BaseDownloader):
                                 logger.info(f"[YouTube Music] JS fallback completed: {audio_path}")
                     except Exception as e:
                         logger.warning(f"[YouTube Music] JS fallback failed: {e}")
+            
+            # Try Piped API
+            if not audio_path or not audio_path.exists():
+                if self._piped:
+                    try:
+                        logger.info("[YouTube Music] Trying Piped...")
+                        result = await self._piped.get_audio_url(processed_url)
+                        
+                        if result.success and result.url:
+                            import requests
+                            response = await asyncio.to_thread(
+                                requests.get, result.url,
+                                headers={'User-Agent': 'Mozilla/5.0'},
+                                timeout=180
+                            )
+                            
+                            if response.status_code == 200:
+                                filename = f"{video_id}.m4a"
+                                audio_path = download_dir / filename
+                                
+                                with open(audio_path, 'wb') as f:
+                                    f.write(response.content)
+                                
+                                logger.info(f"[YouTube Music] Piped completed: {audio_path}")
+                    except Exception as e:
+                        logger.warning(f"[YouTube Music] Piped failed: {e}")
             
             # Fallback to yt-dlp only if Cobalt failed
             if not audio_path or not audio_path.exists():
