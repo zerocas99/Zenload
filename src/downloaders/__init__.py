@@ -1,4 +1,5 @@
 from typing import Optional, Type, List
+import logging
 from .base import BaseDownloader, DownloadError
 from .instagram import InstagramDownloader
 from .tiktok import TikTokDownloader
@@ -6,6 +7,8 @@ from .pinterest import PinterestDownloader
 from .youtube import YouTubeDownloader
 from .soundcloud import SoundcloudDownloader
 from .cobalt_platforms import CobaltPlatformDownloader
+
+logger = logging.getLogger(__name__)
 
 
 class DownloaderFactory:
@@ -23,10 +26,13 @@ class DownloaderFactory:
     @classmethod
     def get_downloader(cls, url: str) -> Optional[BaseDownloader]:
         """Get appropriate downloader for the given URL"""
+        logger.info(f"[Factory] Looking for downloader for: {url[:80]}...")
         for downloader_class in cls._downloaders:
             downloader = downloader_class()
             if downloader.can_handle(url):
+                logger.info(f"[Factory] Found: {downloader_class.__name__}")
                 return downloader
+        logger.warning(f"[Factory] No downloader found for: {url[:80]}")
         return None
 
 
