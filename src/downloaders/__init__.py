@@ -28,10 +28,15 @@ class DownloaderFactory:
         """Get appropriate downloader for the given URL"""
         logger.info(f"[Factory] Looking for downloader for: {url[:80]}...")
         for downloader_class in cls._downloaders:
-            downloader = downloader_class()
-            if downloader.can_handle(url):
-                logger.info(f"[Factory] Found: {downloader_class.__name__}")
-                return downloader
+            try:
+                downloader = downloader_class()
+                logger.debug(f"[Factory] Checking {downloader_class.__name__}...")
+                if downloader.can_handle(url):
+                    logger.info(f"[Factory] Found: {downloader_class.__name__}")
+                    return downloader
+            except Exception as e:
+                logger.error(f"[Factory] Error with {downloader_class.__name__}: {e}")
+                continue
         logger.warning(f"[Factory] No downloader found for: {url[:80]}")
         return None
 
