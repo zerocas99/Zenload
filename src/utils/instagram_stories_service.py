@@ -360,6 +360,7 @@ class InstagramStoriesService:
         """Try igram.world API"""
         try:
             api_url = "https://api.igram.world/api/convert"
+            logger.info(f"[iGram] Requesting for URL: {url[:80]}...")
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -373,11 +374,13 @@ class InstagramStoriesService:
                     },
                     timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
                 ) as response:
+                    logger.info(f"[iGram] Response status: {response.status}")
                     if response.status != 200:
-                        logger.debug(f"[iGram] API failed: {response.status}")
+                        logger.warning(f"[iGram] API failed: {response.status}")
                         return None
                     
                     data = await response.json()
+                    logger.info(f"[iGram] Response keys: {list(data.keys()) if isinstance(data, dict) else 'not dict'}")
                     
                     # Check for media array
                     media = data.get('media') or data.get('items') or []
@@ -392,10 +395,11 @@ class InstagramStoriesService:
                                 'url': item['url']
                             })
                     
+                    logger.info(f"[iGram] Found {len(stories)} stories")
                     return stories if stories else None
                     
         except Exception as e:
-            logger.debug(f"[iGram] Error: {e}")
+            logger.warning(f"[iGram] Error: {e}")
             return None
 
     async def _try_saveig(self, url: str) -> Optional[List[Dict]]:
@@ -493,9 +497,17 @@ class InstagramStoriesService:
         story_id = self._extract_story_id(url)
         logger.info(f"[Stories] Getting stories for @{username}, story_id={story_id}")
         
-        # If we have specific story_id, try StoriesIG first (returns proper IDs)
+        # If we have specific story_id, try services that can handle specific stories
         if story_id:
-            logger.info(f"[Stories] Trying StoriesIG first for specific story_id={story_id}")
+            # Try iGram first - it accepts full URL with story_id
+            logger.info(f"[Stories] Trying iGram for specific story_id={story_id}")
+            stories = await self._try_igram(url)
+            if stories:
+                logger.info(f"[Stories] Got {len(stories)} stories from iGram")
+                return stories
+            
+            # Try StoriesIG
+            logger.info(f"[Stories] Trying StoriesIG for specific story_id={story_id}")
             stories = await self._try_storiesig(username, story_id)
             if stories:
                 logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
@@ -515,11 +527,12 @@ class InstagramStoriesService:
                 logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
                 return stories
         
-        # Try iGram
-        stories = await self._try_igram(url)
-        if stories:
-            logger.info(f"[Stories] Got {len(stories)} stories from iGram")
-            return stories
+        # Try iGram (if not tried above)
+        if not story_id:
+            stories = await self._try_igram(url)
+            if stories:
+                logger.info(f"[Stories] Got {len(stories)} stories from iGram")
+                return stories
         
         # Try SaveIG
         stories = await self._try_saveig(url)
