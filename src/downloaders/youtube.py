@@ -527,11 +527,15 @@ class YouTubeDownloader(BaseDownloader):
                 ydl_opts = {
                     'format': 'bestaudio/best',
                     'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
-                    'quiet': True,
-                    'no_warnings': True,
+                    'quiet': False,
+                    'no_warnings': False,
+                    'verbose': True,
                 }
                 if self.cookie_file.exists():
                     ydl_opts['cookiefile'] = str(self.cookie_file)
+                    logger.info(f"[YouTube Music] Using cookies file: {self.cookie_file}")
+                else:
+                    logger.warning(f"[YouTube Music] Cookies file not found: {self.cookie_file}")
                 
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
