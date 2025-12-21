@@ -19,6 +19,7 @@ class YouTubeJSResult:
     error: Optional[str] = None
     quality: Optional[str] = None
     container: Optional[str] = None
+    content: Optional[bytes] = None  # Контент файла (если стриминг)
 
 
 class YouTubeJSFallback:
@@ -30,28 +31,42 @@ class YouTubeJSFallback:
         self.timeout = aiohttp.ClientTimeout(total=60)
     
     async def get_video_url(self, url: str, quality: str = "highest") -> YouTubeJSResult:
-        """Получить прямую ссылку на видео"""
+        """Получить видео через Node.js сервис (стриминг)"""
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                params = {"url": url, "quality": quality}
-                async with session.get(f"{self.base_url}/youtube/video", params=params) as resp:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
+                params = {"url": url, "type": "video"}
+                async with session.get(f"{self.base_url}/youtube/stream", params=params) as resp:
                     if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success"):
+                        # Читаем весь контент
+                        content = await resp.read()
+                        if len(content) > 10000:  # Минимум 10KB
+                            # Получаем имя файла из заголовка
+                            content_disp = resp.headers.get('Content-Disposition', '')
+                            filename = None
+                            if 'filename=' in content_disp:
+                                filename = content_disp.split('filename=')[1].strip('"')
+                            
                             return YouTubeJSResult(
                                 success=True,
-                                url=data.get("url"),
-                                title=data.get("title"),
-                                quality=data.get("quality"),
-                                container=data.get("container")
+                                url=None,  # URL не нужен, у нас есть контент
+                                title=filename,
+                                container='mp4',
+                                content=content  # Добавляем контент
+                            )
+                        else:
+                            return YouTubeJSResult(
+                                success=False,
+                                error=f"File too small: {len(content)} bytes"
                             )
                     
                     # Ошибка
-                    data = await resp.json() if resp.content_type == 'application/json' else {}
-                    return YouTubeJSResult(
-                        success=False,
-                        error=data.get("error", f"HTTP {resp.status}")
-                    )
+                    try:
+                        data = await resp.json()
+                        error = data.get("error", f"HTTP {resp.status}")
+                    except:
+                        error = f"HTTP {resp.status}"
+                    return YouTubeJSResult(success=False, error=error)
+                    
         except aiohttp.ClientError as e:
             logger.error(f"[YouTubeJS] Connection error: {e}")
             return YouTubeJSResult(success=False, error=f"Connection error: {e}")
@@ -60,26 +75,39 @@ class YouTubeJSFallback:
             return YouTubeJSResult(success=False, error=str(e))
     
     async def get_audio_url(self, url: str) -> YouTubeJSResult:
-        """Получить прямую ссылку на аудио"""
+        """Получить аудио через Node.js сервис (стриминг)"""
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                params = {"url": url}
-                async with session.get(f"{self.base_url}/youtube/audio", params=params) as resp:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
+                params = {"url": url, "type": "audio"}
+                async with session.get(f"{self.base_url}/youtube/stream", params=params) as resp:
                     if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success"):
+                        content = await resp.read()
+                        if len(content) > 5000:  # Минимум 5KB для аудио
+                            content_disp = resp.headers.get('Content-Disposition', '')
+                            filename = None
+                            if 'filename=' in content_disp:
+                                filename = content_disp.split('filename=')[1].strip('"')
+                            
                             return YouTubeJSResult(
                                 success=True,
-                                url=data.get("url"),
-                                title=data.get("title"),
-                                container=data.get("container")
+                                url=None,
+                                title=filename,
+                                container='m4a',
+                                content=content
+                            )
+                        else:
+                            return YouTubeJSResult(
+                                success=False,
+                                error=f"File too small: {len(content)} bytes"
                             )
                     
-                    data = await resp.json() if resp.content_type == 'application/json' else {}
-                    return YouTubeJSResult(
-                        success=False,
-                        error=data.get("error", f"HTTP {resp.status}")
-                    )
+                    try:
+                        data = await resp.json()
+                        error = data.get("error", f"HTTP {resp.status}")
+                    except:
+                        error = f"HTTP {resp.status}"
+                    return YouTubeJSResult(success=False, error=error)
+                    
         except aiohttp.ClientError as e:
             logger.error(f"[YouTubeJS] Connection error: {e}")
             return YouTubeJSResult(success=False, error=f"Connection error: {e}")

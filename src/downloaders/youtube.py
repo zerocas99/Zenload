@@ -159,44 +159,25 @@ class YouTubeDownloader(BaseDownloader):
             if self._youtube_js:
                 try:
                     logger.info("[YouTube] Trying ytdl-core-enhanced via Node.js...")
-                    quality = format_id if format_id and format_id != 'best' else "highest"
-                    result = await self._youtube_js.get_video_url(processed_url, quality)
+                    result = await self._youtube_js.get_video_url(processed_url)
                     
-                    if result.success and result.url:
-                        logger.info(f"[YouTube] JS fallback got URL, downloading from: {result.url[:100]}...")
-                        self.update_progress('status_downloading', 30)
+                    if result.success and result.content:
+                        logger.info(f"[YouTube] JS fallback success, got {len(result.content)} bytes")
+                        self.update_progress('status_downloading', 80)
                         
-                        import requests
-                        response = await asyncio.to_thread(
-                            requests.get, result.url,
-                            headers={
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                                'Accept': '*/*',
-                                'Accept-Encoding': 'identity',
-                                'Connection': 'keep-alive',
-                            },
-                            timeout=300,
-                            stream=False
-                        )
+                        video_id = processed_url.split('v=')[-1].split('&')[0] if 'v=' in processed_url else 'video'
+                        ext = result.container or 'mp4'
+                        filename = f"{video_id}.{ext}"
+                        file_path = download_dir / filename
                         
-                        logger.info(f"[YouTube] JS fallback response: status={response.status_code}, size={len(response.content)}")
+                        with open(file_path, 'wb') as f:
+                            f.write(result.content)
                         
-                        if response.status_code == 200 and len(response.content) > 10000:
-                            video_id = processed_url.split('v=')[-1].split('&')[0] if 'v=' in processed_url else 'video'
-                            ext = result.container or 'mp4'
-                            filename = f"{video_id}.{ext}"
-                            file_path = download_dir / filename
-                            
-                            with open(file_path, 'wb') as f:
-                                f.write(response.content)
-                            
-                            self.update_progress('status_downloading', 100)
-                            logger.info(f"[YouTube] JS fallback download completed: {file_path} ({len(response.content)} bytes)")
-                            return "", file_path
-                        else:
-                            logger.warning(f"[YouTube] JS fallback download failed: status={response.status_code}, size={len(response.content)}")
+                        self.update_progress('status_downloading', 100)
+                        logger.info(f"[YouTube] JS fallback download completed: {file_path}")
+                        return "", file_path
                     else:
-                        logger.warning(f"[YouTube] JS fallback no URL: {result.error}")
+                        logger.warning(f"[YouTube] JS fallback failed: {result.error}")
                 except Exception as e:
                     logger.warning(f"[YouTube] JS fallback failed: {e}, trying Piped...")
             
@@ -326,25 +307,21 @@ class YouTubeDownloader(BaseDownloader):
                     logger.info("[YouTube] Trying JS fallback for audio...")
                     result = await self._youtube_js.get_audio_url(url)
                     
-                    if result.success and result.url:
-                        import requests
-                        response = await asyncio.to_thread(
-                            requests.get, result.url,
-                            headers={'User-Agent': 'Mozilla/5.0'},
-                            timeout=180
-                        )
+                    if result.success and result.content:
+                        logger.info(f"[YouTube] JS audio success, got {len(result.content)} bytes")
                         
-                        if response.status_code == 200:
-                            video_id = url.split('v=')[-1].split('&')[0] if 'v=' in url else 'audio'
-                            ext = result.container or 'm4a'
-                            filename = f"{video_id}.{ext}"
-                            file_path = download_dir / filename
-                            
-                            with open(file_path, 'wb') as f:
-                                f.write(response.content)
-                            
-                            logger.info(f"[YouTube] JS fallback audio completed: {file_path}")
-                            return "", file_path
+                        video_id = url.split('v=')[-1].split('&')[0] if 'v=' in url else 'audio'
+                        ext = result.container or 'm4a'
+                        filename = f"{video_id}.{ext}"
+                        file_path = download_dir / filename
+                        
+                        with open(file_path, 'wb') as f:
+                            f.write(result.content)
+                        
+                        logger.info(f"[YouTube] JS fallback audio completed: {file_path}")
+                        return "", file_path
+                    else:
+                        logger.warning(f"[YouTube] JS audio failed: {result.error}")
                 except Exception as e:
                     logger.warning(f"[YouTube] JS fallback audio failed: {e}")
             
@@ -457,23 +434,18 @@ class YouTubeDownloader(BaseDownloader):
                         logger.info("[YouTube Music] Trying JS fallback...")
                         result = await self._youtube_js.get_audio_url(processed_url)
                         
-                        if result.success and result.url:
-                            import requests
-                            response = await asyncio.to_thread(
-                                requests.get, result.url,
-                                headers={'User-Agent': 'Mozilla/5.0'},
-                                timeout=180
-                            )
+                        if result.success and result.content:
+                            logger.info(f"[YouTube Music] JS success, got {len(result.content)} bytes")
+                            ext = result.container or 'm4a'
+                            filename = f"{video_id}.{ext}"
+                            audio_path = download_dir / filename
                             
-                            if response.status_code == 200:
-                                ext = result.container or 'm4a'
-                                filename = f"{video_id}.{ext}"
-                                audio_path = download_dir / filename
-                                
-                                with open(audio_path, 'wb') as f:
-                                    f.write(response.content)
-                                
-                                logger.info(f"[YouTube Music] JS fallback completed: {audio_path}")
+                            with open(audio_path, 'wb') as f:
+                                f.write(result.content)
+                            
+                            logger.info(f"[YouTube Music] JS fallback completed: {audio_path}")
+                        else:
+                            logger.warning(f"[YouTube Music] JS failed: {result.error}")
                     except Exception as e:
                         logger.warning(f"[YouTube Music] JS fallback failed: {e}")
             
