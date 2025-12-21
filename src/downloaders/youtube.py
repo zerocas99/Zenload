@@ -276,13 +276,13 @@ class YouTubeDownloader(BaseDownloader):
         """Download using yt-dlp with cookies"""
         self.update_progress('status_downloading', 10)
         
-        # Simplified format selection - let yt-dlp choose best available
+        # Simple format - let yt-dlp choose
         if format_id == 'audio':
             format_str = 'bestaudio/best'
         elif format_id and format_id != 'best':
             format_str = f'best[height<={format_id}]/best'
         else:
-            format_str = 'best[ext=mp4]/best'
+            format_str = 'best'  # Let yt-dlp choose the best available
         
         ydl_opts = {
             'format': format_str,
