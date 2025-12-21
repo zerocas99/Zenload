@@ -227,14 +227,34 @@ class MessageHandlers:
                     pass
                 status_message = None
             
-            # Download with best quality (no format selection)
-            download_task = asyncio.create_task(
-                self._download_with_fallback(
-                    downloader, 
-                    url, 
-                    update
-                )
+            # Check if this is Instagram story with specific ID - handle specially
+            is_instagram_story = (
+                hasattr(downloader, '_is_story_url') and 
+                hasattr(downloader, '_has_specific_story_id') and
+                downloader._is_story_url(url) and 
+                downloader._has_specific_story_id(url)
             )
+            
+            if is_instagram_story:
+                # For Instagram stories with specific ID, try Cobalt first then fallback
+                download_task = asyncio.create_task(
+                    self._download_instagram_story_with_fallback(
+                        downloader, 
+                        url, 
+                        update
+                    )
+                )
+            else:
+                # Normal download
+                download_task = asyncio.create_task(
+                    self.download_manager.process_download(
+                        downloader, 
+                        url, 
+                        update, 
+                        None,
+                        'best'
+                    )
+                )
             
             task_key = f"{user_id}:{url}"
             self._download_tasks[task_key] = download_task
@@ -258,34 +278,83 @@ class MessageHandlers:
                 except:
                     pass
 
-    async def _download_with_fallback(self, downloader, url: str, update: Update):
-        """Download with fallback to all stories for Instagram"""
-        from ..downloaders.base import DownloadError
+    async def _download_instagram_story_with_fallback(self, downloader, url: str, update: Update):
+        """Download Instagram story: try Cobalt for specific story, fallback to all stories"""
+        from ..utils.cobalt_service import cobalt
+        import aiohttp
+        from pathlib import Path
+        
+        user_id = update.effective_user.id
+        settings = self.settings_manager.get_settings(user_id)
+        lang = settings.language
+        
+        # Try Cobalt first for specific story
+        logger.info(f"[Instagram] Trying Cobalt for specific story: {url}")
         
         try:
-            await self.download_manager.process_download(
-                downloader, 
-                url, 
-                update, 
-                None,
-                'best'
+            result = await asyncio.wait_for(
+                cobalt.request(url),
+                timeout=15
             )
-        except DownloadError as e:
-            error_msg = str(e)
-            if error_msg == "FALLBACK_TO_ALL_STORIES" or "FALLBACK_TO_ALL_STORIES" in error_msg:
-                # Fallback to downloading all stories
-                logger.info(f"Falling back to all stories for {url}")
-                await self._process_all_stories(url, update, downloader)
-            else:
-                # Re-raise other errors - they're already handled by download_manager
-                pass
+            
+            if result.success and result.url:
+                # Cobalt worked! Download and send
+                logger.info("[Instagram] Cobalt success for specific story")
+                
+                download_dir = Path(__file__).parent.parent / "downloads"
+                download_dir.mkdir(exist_ok=True)
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        result.url,
+                        headers={'User-Agent': 'Mozilla/5.0'},
+                        timeout=aiohttp.ClientTimeout(total=60)
+                    ) as response:
+                        if response.status == 200:
+                            content = await response.read()
+                            
+                            # Detect type
+                            is_video = len(content) > 8 and content[4:8] == b'ftyp'
+                            ext = 'mp4' if is_video else 'jpg'
+                            filename = f"story_{hash(url) % 100000}.{ext}"
+                            file_path = download_dir / filename
+                            
+                            with open(file_path, 'wb') as f:
+                                f.write(content)
+                            
+                            # Send to user
+                            if lang == 'ru':
+                                caption = "📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
+                            else:
+                                caption = "📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
+                            
+                            with open(file_path, 'rb') as f:
+                                if is_video:
+                                    await update.effective_message.reply_video(
+                                        video=f,
+                                        caption=caption,
+                                        supports_streaming=True
+                                    )
+                                else:
+                                    await update.effective_message.reply_photo(
+                                        photo=f,
+                                        caption=caption
+                                    )
+                            
+                            # Cleanup
+                            try:
+                                file_path.unlink()
+                            except:
+                                pass
+                            
+                            return
+                            
         except Exception as e:
-            error_msg = str(e)
-            # Check if it's the fallback error wrapped
-            if "FALLBACK_TO_ALL_STORIES" in error_msg:
-                logger.info(f"Falling back to all stories for {url}")
-                await self._process_all_stories(url, update, downloader)
-            # Other exceptions are already handled by download_manager
+            logger.info(f"[Instagram] Cobalt failed for specific story: {e}")
+        
+        # Cobalt failed - download all stories
+        logger.info("[Instagram] Falling back to all stories")
+        await self._process_all_stories(url, update, downloader)
 
     async def _process_all_stories(self, url: str, update: Update, downloader):
         """Process all Instagram stories from a user"""

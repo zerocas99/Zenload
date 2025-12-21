@@ -705,7 +705,10 @@ class DownloadManager:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"Error processing download: {e}")
+                    error_msg = str(e)
+                    # Don't log FALLBACK as error - it's expected behavior
+                    if "FALLBACK_TO_ALL_STORIES" not in error_msg:
+                        logger.error(f"Error processing download: {e}")
                 finally:
                     try:
                         self.download_queue.task_done()
