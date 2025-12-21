@@ -30,6 +30,9 @@ INSTANCES_CACHE_TTL = 3600  # 1 hour
 OFFICIAL_API = "https://api.cobalt.tools/"
 OFFICIAL_TOKEN = os.getenv("COBALT_API_TOKEN", "")
 
+# YOUR OWN COBALT INSTANCE (highest priority!)
+SELF_HOSTED_COBALT = os.getenv("COBALT_SELF_HOSTED", "https://cobalt-production-c086.up.railway.app/")
+
 # Fallback instances - ORDERED BY YOUTUBE SUPPORT (updated 22.12.2025)
 YOUTUBE_INSTANCES = [
     "https://cobalt-backend.canine.tools/",
@@ -182,7 +185,24 @@ class CobaltService:
             "twitterGif": True,
         }
         
-        # 1. Try Official API if token exists
+        # 1. Try SELF-HOSTED Cobalt first (most reliable!)
+        if SELF_HOSTED_COBALT:
+            logger.info(f"[Cobalt] Using self-hosted instance: {SELF_HOSTED_COBALT}")
+            data = await self._make_request(SELF_HOSTED_COBALT, payload)
+            if data:
+                status = data.get("status")
+                if status in ("redirect", "tunnel"):
+                    logger.info("[Cobalt] Self-hosted success!")
+                    return CobaltResult(success=True, url=data.get("url"), filename=data.get("filename"))
+                elif status == "picker":
+                    return CobaltResult(success=True, picker=data.get("picker", []))
+                elif status == "error":
+                    error = data.get("error", {})
+                    code = error.get("code") if isinstance(error, dict) else str(error)
+                    logger.warning(f"[Cobalt] Self-hosted error: {code}")
+                    # Don't return error, try other instances
+        
+        # 2. Try Official API if token exists
         if OFFICIAL_TOKEN:
             logger.info("[Cobalt] Using official API with token")
             data = await self._make_request(OFFICIAL_API, payload, use_token=True)
@@ -196,7 +216,7 @@ class CobaltService:
                     code = error.get("code") if isinstance(error, dict) else str(error)
                     return CobaltResult(success=False, error=code)
 
-        # 2. Try Public Instances
+        # 3. Try Public Instances (fallback)
         instances = await self._get_instances(url)
         
         for attempt, instance in enumerate(instances[:5]):
