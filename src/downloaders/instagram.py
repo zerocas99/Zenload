@@ -59,12 +59,9 @@ class InstagramDownloader(BaseDownloader):
         return '/stories/' in url
 
     def _is_all_stories_url(self, url: str) -> bool:
-        """Check if URL is for all stories (no specific story ID)"""
-        if '/stories/' not in url:
-            return False
-        # URL like instagram.com/stories/username/ without story ID
-        match = re.search(r'instagram\.com/stories/([^/]+)/?$', url)
-        return match is not None
+        """Check if URL is for stories - always download all stories"""
+        # Any stories URL should download all stories
+        return '/stories/' in url
 
     def platform_id(self) -> str:
         return 'instagram'
