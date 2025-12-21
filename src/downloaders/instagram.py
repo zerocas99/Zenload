@@ -192,19 +192,26 @@ class InstagramDownloader(BaseDownloader):
 
     async def download_all_stories(self, url: str) -> List[Tuple[str, Path, str]]:
         """
-        Download all stories from a user.
+        Download stories from a user.
+        If URL has specific story ID, tries to find that story.
         Returns: List of (metadata, file_path, media_type)
         """
         username = self._extract_username(url)
         if not username:
             raise DownloadError("Не удалось определить username")
         
-        logger.info(f"[Instagram] Downloading all stories for @{username}")
+        # Check if looking for specific story
+        story_id = None
+        match = re.search(r'instagram\.com/stories/[^/]+/(\d+)', url)
+        if match:
+            story_id = match.group(1)
+        
+        logger.info(f"[Instagram] Downloading stories for @{username}, specific_id={story_id}")
         
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
         
-        # Get all stories
+        # Get stories
         stories = await instagram_stories_service.get_stories(url)
         if not stories:
             raise DownloadError(f"Не найдено сторис у @{username}. Возможно, аккаунт приватный или сторис нет.")
@@ -252,6 +259,8 @@ class InstagramDownloader(BaseDownloader):
                 continue
         
         if not downloaded:
+            if story_id:
+                raise DownloadError(f"Не удалось найти конкретную сторис. Возможно, она уже истекла.")
             raise DownloadError("Не удалось скачать ни одну сторис")
         
         return downloaded

@@ -495,9 +495,16 @@ class InstagramStoriesService:
                             
                             # If looking for specific story
                             if story_id and item_id == story_id:
+                                logger.info(f"[StoriesIG] Found specific story by ID: {story_id}")
                                 return [story_item]
                             
                             stories.append(story_item)
+                    
+                    # If we were looking for specific story but didn't find it
+                    if story_id and stories:
+                        logger.warning(f"[StoriesIG] Specific story {story_id} not found in {len(stories)} stories")
+                        # Return None to try next service instead of returning wrong story
+                        return None
                     
                     return stories if stories else None
                     
