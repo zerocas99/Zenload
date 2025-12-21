@@ -50,7 +50,7 @@ PLATFORMS = {
         'name': 'Vimeo',
     },
     'tumblr': {
-        'domains': ['tumblr.com', 'www.tumblr.com'],
+        'domains': ['tumblr.com', 'www.tumblr.com', 't.umblr.com'],
         'name': 'Tumblr',
     },
     'streamable': {
@@ -82,7 +82,7 @@ PLATFORMS = {
         'name': 'Newgrounds',
     },
     'twitter': {
-        'domains': ['twitter.com', 'x.com', 't.co', 'mobile.twitter.com', 'mobile.x.com'],
+        'domains': ['twitter.com', 'x.com', 't.co', 'mobile.twitter.com', 'mobile.x.com', 'fxtwitter.com', 'vxtwitter.com', 'fixupx.com'],
         'name': 'Twitter/X',
     },
 }
@@ -101,14 +101,33 @@ class CobaltPlatformDownloader(BaseDownloader):
     def _detect_platform(self, url: str) -> Optional[str]:
         """Detect which platform the URL belongs to"""
         parsed = urlparse(url)
-        domain = parsed.netloc.lower().replace('www.', '').replace('m.', '')
+        domain = parsed.netloc.lower()
+        
+        # Remove www. and m. prefixes for comparison
+        clean_domain = domain
+        for prefix in ['www.', 'm.', 'mobile.', 'web.']:
+            if clean_domain.startswith(prefix):
+                clean_domain = clean_domain[len(prefix):]
         
         for platform_id, config in PLATFORMS.items():
             for d in config['domains']:
-                # Check if domain matches or is subdomain
-                clean_d = d.replace('www.', '').replace('m.', '')
-                if clean_d in domain or domain.endswith(clean_d):
+                # Clean the config domain too
+                clean_d = d.lower()
+                for prefix in ['www.', 'm.', 'mobile.', 'web.']:
+                    if clean_d.startswith(prefix):
+                        clean_d = clean_d[len(prefix):]
+                
+                # Exact match or subdomain match
+                if clean_domain == clean_d or clean_domain.endswith('.' + clean_d):
+                    logger.debug(f"[Cobalt] Detected platform {platform_id} for domain {domain}")
                     return platform_id
+                
+                # Also check original domain for special cases like clips.twitch.tv
+                if domain == d.lower() or domain.endswith('.' + d.lower()):
+                    logger.debug(f"[Cobalt] Detected platform {platform_id} for domain {domain} (exact)")
+                    return platform_id
+        
+        logger.debug(f"[Cobalt] No platform detected for domain: {domain}")
         return None
     
     def can_handle(self, url: str) -> bool:
@@ -116,7 +135,9 @@ class CobaltPlatformDownloader(BaseDownloader):
         platform = self._detect_platform(url)
         if platform:
             self._detected_platform = platform
+            logger.info(f"[Cobalt] can_handle=True for {platform}: {url[:80]}")
             return True
+        logger.debug(f"[Cobalt] can_handle=False: {url[:80]}")
         return False
     
     def get_platform_name(self, url: str = None) -> str:
