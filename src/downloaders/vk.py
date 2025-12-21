@@ -148,6 +148,7 @@ class VKDownloader(BaseDownloader):
                 logger.info("[VK] Trying Cobalt...")
                 self.update_progress('status_downloading', 10)
                 
+                # Default to 720p to avoid huge files
                 quality = format_id if format_id and format_id != 'best' else "720"
                 result = await self._cobalt.request(processed_url, video_quality=quality)
                 
@@ -185,11 +186,16 @@ class VKDownloader(BaseDownloader):
             video_id = self._extract_video_id(processed_url)
             temp_filename = f"vk_{video_id or os.urandom(4).hex()}"
             
-            # Format selection
+            # Format selection - default to 720p max to avoid huge files
             if format_id and format_id != 'best':
-                format_str = f'best[height<={format_id}][ext=mp4]/best[height<={format_id}]/best'
+                # User selected specific quality
+                height = format_id.replace('p', '') if format_id.endswith('p') else format_id
+                format_str = f'best[height<={height}][ext=mp4]/best[height<={height}]/best[height<=720]'
             else:
-                format_str = 'best[ext=mp4]/best'
+                # Default: max 720p to avoid 5GB files
+                format_str = 'best[height<=720][ext=mp4]/best[height<=720]/best[height<=480]'
+            
+            logger.info(f"[VK] Using format: {format_str}")
             
             ydl_opts = {
                 'format': format_str,

@@ -102,6 +102,10 @@ class MessageHandlers:
         # YouTube Music should be treated as audio, not video with quality selection
         return False  # Temporarily disable YouTube quality selection - Cobalt handles it
 
+    def _is_vk_url(self, url: str) -> bool:
+        """Check if URL is from VK"""
+        return any(domain in url.lower() for domain in ['vk.com', 'm.vk.com', 'vk.ru', 'vkvideo.ru'])
+
     async def _process_url(self, url: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Process URL from message or command"""
         user_id = update.effective_user.id
@@ -121,14 +125,16 @@ class MessageHandlers:
                 )
             return
 
-        # Check if this is YouTube - only YouTube gets quality selection
+        # Check if this is YouTube or VK - they get quality selection
         is_youtube = self._is_youtube_url(url)
+        is_vk = self._is_vk_url(url)
+        needs_quality_selection = is_youtube or is_vk
         
         status_message = None
 
         try:
-            # Only get formats for YouTube
-            if is_youtube:
+            # Only get formats for YouTube and VK
+            if needs_quality_selection:
                 # Show loading message
                 try:
                     status_message = await update.message.reply_text("⏳ Загрузка...")
