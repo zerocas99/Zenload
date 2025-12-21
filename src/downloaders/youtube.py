@@ -273,45 +273,112 @@ class YouTubeDownloader(BaseDownloader):
                 raise DownloadError(f"Ошибка загрузки: {error_msg}")
 
     async def _download_with_ytdlp(self, url: str, download_dir: Path, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download using yt-dlp"""
+        """Download using yt-dlp with optimized settings from ytdlbot"""
         self.update_progress('status_downloading', 10)
         
+        # Format selection optimized for Telegram (max 2GB, prefer mp4)
         if format_id == 'audio':
-            format_str = 'bestaudio/best'
+            format_str = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
         elif format_id and format_id != 'best':
-            format_str = f'best[height<={format_id}][ext=mp4]/best[height<={format_id}]/best[ext=mp4]/best'
+            # Prefer mp4 with specific height, fallback to any format
+            format_str = (
+                f'bestvideo[height<={format_id}][ext=mp4]+bestaudio[ext=m4a]/'
+                f'bestvideo[height<={format_id}]+bestaudio/'
+                f'best[height<={format_id}][ext=mp4]/'
+                f'best[height<={format_id}]/best'
+            )
         else:
-            format_str = 'best[ext=mp4]/best'
+            # Best quality that fits Telegram limits (prefer mp4)
+            format_str = (
+                'bestvideo[ext=mp4][filesize<2G]+bestaudio[ext=m4a]/'
+                'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo+bestaudio/best[ext=mp4]/best'
+            )
         
+        # Optimized yt-dlp options (best practices from ytdlbot)
         ydl_opts = {
             'format': format_str,
             'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': True,  # Don't download playlists
+            'ignoreerrors': False,
+            'no_color': True,
+            'merge_output_format': 'mp4',  # Merge to mp4 for Telegram compatibility
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
+            # Network optimizations
+            'socket_timeout': 30,
+            'retries': 3,
+            'fragment_retries': 3,
+            'skip_unavailable_fragments': True,
+            # Bypass age gate and geo restrictions
+            'age_limit': None,
+            'geo_bypass': True,
+            'geo_bypass_country': 'US',
+            # User agent rotation
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            },
+            # Extractor args for YouTube
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],  # Try multiple clients
+                    'skip': ['dash', 'hls'],  # Skip problematic formats
+                }
+            },
         }
+        
+        # Add cookies if available
         if self.cookie_file.exists():
             ydl_opts['cookiefile'] = str(self.cookie_file)
+            logger.info(f"[YouTube] Using cookies: {self.cookie_file}")
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = await asyncio.to_thread(ydl.extract_info, url, download=True)
-            if info:
-                filename = ydl.prepare_filename(info)
-                file_path = Path(filename).resolve()
-                
-                if not file_path.exists():
-                    mp4_path = file_path.with_suffix('.mp4')
-                    if mp4_path.exists():
-                        file_path = mp4_path
-                    else:
-                        video_id = info.get('id', '')
-                        for f in download_dir.glob(f"{video_id}.*"):
-                            if f.suffix.lower() in ['.mp4', '.mkv', '.webm']:
-                                file_path = f
-                                break
-                
-                if file_path.exists():
-                    logger.info(f"[YouTube] yt-dlp download completed: {file_path}")
-                    return "", file_path
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = await asyncio.to_thread(ydl.extract_info, url, download=True)
+                if info:
+                    filename = ydl.prepare_filename(info)
+                    file_path = Path(filename).resolve()
+                    
+                    # Handle merged files (may have different extension)
+                    if not file_path.exists():
+                        mp4_path = file_path.with_suffix('.mp4')
+                        if mp4_path.exists():
+                            file_path = mp4_path
+                        else:
+                            video_id = info.get('id', '')
+                            for f in download_dir.glob(f"{video_id}.*"):
+                                if f.suffix.lower() in ['.mp4', '.mkv', '.webm']:
+                                    file_path = f
+                                    break
+                    
+                    if file_path.exists():
+                        logger.info(f"[YouTube] yt-dlp download completed: {file_path}")
+                        return "", file_path
+        except Exception as e:
+            error_str = str(e)
+            logger.error(f"[YouTube] yt-dlp error: {error_str}")
+            
+            # Specific error handling
+            if "Sign in" in error_str or "login" in error_str.lower():
+                raise DownloadError("YouTube требует авторизации. Попробуйте позже.")
+            elif "Private video" in error_str:
+                raise DownloadError("Это приватное видео")
+            elif "Video unavailable" in error_str:
+                raise DownloadError("Видео недоступно")
+            elif "age" in error_str.lower():
+                raise DownloadError("Видео с возрастным ограничением")
+            else:
+                raise DownloadError(f"Ошибка загрузки: {error_str[:100]}")
 
         raise DownloadError("Не удалось загрузить видео")
 

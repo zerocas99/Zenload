@@ -212,14 +212,22 @@ class CobaltService:
             
             if data:
                 status = data.get("status")
+                logger.info(f"[Cobalt] Instance {instance} returned status: {status}")
+                
                 if status in ("redirect", "tunnel"):
+                    logger.info(f"[Cobalt] Success! Got download URL from {instance}")
                     return CobaltResult(success=True, url=data.get("url"), filename=data.get("filename"))
                 elif status == "picker":
+                    logger.info(f"[Cobalt] Got picker with {len(data.get('picker', []))} items")
                     return CobaltResult(success=True, picker=data.get("picker", []))
                 elif status == "error":
-                    code = data.get("error", {}).get("code")
-                    if any(x in str(code) for x in ["content", "unavailable", "private"]):
+                    error_info = data.get("error", {})
+                    code = error_info.get("code") if isinstance(error_info, dict) else str(error_info)
+                    logger.warning(f"[Cobalt] Instance {instance} error: {code}")
+                    if any(x in str(code) for x in ["content", "unavailable", "private", "youtube.login"]):
                         return CobaltResult(success=False, error=code)
+            else:
+                logger.warning(f"[Cobalt] Instance {instance} returned no data")
             
             self._failed_instances.add(instance)
         
