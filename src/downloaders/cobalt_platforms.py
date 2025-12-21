@@ -108,6 +108,9 @@ class CobaltPlatformDownloader(BaseDownloader):
         for prefix in ['www.', 'm.', 'mobile.', 'web.']:
             if clean_domain.startswith(prefix):
                 clean_domain = clean_domain[len(prefix):]
+                break  # Only remove one prefix
+        
+        logger.info(f"[Cobalt] Checking domain: {domain} -> {clean_domain}")
         
         for platform_id, config in PLATFORMS.items():
             for d in config['domains']:
@@ -116,18 +119,19 @@ class CobaltPlatformDownloader(BaseDownloader):
                 for prefix in ['www.', 'm.', 'mobile.', 'web.']:
                     if clean_d.startswith(prefix):
                         clean_d = clean_d[len(prefix):]
+                        break  # Only remove one prefix
                 
                 # Exact match or subdomain match
                 if clean_domain == clean_d or clean_domain.endswith('.' + clean_d):
-                    logger.debug(f"[Cobalt] Detected platform {platform_id} for domain {domain}")
+                    logger.info(f"[Cobalt] Detected platform {platform_id} for domain {domain}")
                     return platform_id
                 
                 # Also check original domain for special cases like clips.twitch.tv
                 if domain == d.lower() or domain.endswith('.' + d.lower()):
-                    logger.debug(f"[Cobalt] Detected platform {platform_id} for domain {domain} (exact)")
+                    logger.info(f"[Cobalt] Detected platform {platform_id} for domain {domain} (exact)")
                     return platform_id
         
-        logger.debug(f"[Cobalt] No platform detected for domain: {domain}")
+        logger.info(f"[Cobalt] No platform detected for domain: {domain}")
         return None
     
     def can_handle(self, url: str) -> bool:
