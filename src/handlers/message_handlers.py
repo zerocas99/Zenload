@@ -112,15 +112,18 @@ class MessageHandlers:
         downloader = DownloaderFactory.get_downloader(url)
         if not downloader:
             try:
-                # Try to reply first
                 await update.message.reply_text(
                     self.get_message(user_id, 'unsupported_url')
                 )
             except Exception:
-                # If can't reply (no admin rights), send without reply
                 await update.effective_chat.send_message(
                     self.get_message(user_id, 'unsupported_url')
                 )
+            return
+
+        # Check if this is Instagram all stories URL
+        if hasattr(downloader, '_is_all_stories_url') and downloader._is_all_stories_url(url):
+            await self._process_all_stories(url, update, downloader)
             return
 
         # Check if this is YouTube - it gets quality selection
@@ -257,3 +260,80 @@ class MessageHandlers:
                 except:
                     pass
 
+    async def _process_all_stories(self, url: str, update: Update, downloader):
+        """Process all Instagram stories from a user"""
+        user_id = update.effective_user.id
+        
+        # Get language for messages
+        settings = self.settings_manager.get_settings(user_id)
+        lang = settings.language
+        
+        # Send loading message
+        if lang == 'ru':
+            loading_msg = await update.message.reply_text("⏳ Загружаю все сторис...")
+        else:
+            loading_msg = await update.message.reply_text("⏳ Loading all stories...")
+        
+        try:
+            # Download all stories
+            stories = await downloader.download_all_stories(url)
+            
+            if not stories:
+                await loading_msg.edit_text(
+                    "❌ Не найдено сторис" if lang == 'ru' else "❌ No stories found"
+                )
+                return
+            
+            # Update message
+            count = len(stories)
+            if lang == 'ru':
+                await loading_msg.edit_text(f"📤 Отправляю {count} сторис...")
+            else:
+                await loading_msg.edit_text(f"📤 Sending {count} stories...")
+            
+            # Send each story
+            sent = 0
+            for metadata, file_path, media_type in stories:
+                try:
+                    with open(file_path, 'rb') as f:
+                        if media_type == 'video':
+                            await update.effective_chat.send_video(
+                                video=f,
+                                supports_streaming=True,
+                                read_timeout=60,
+                                write_timeout=60
+                            )
+                        else:
+                            await update.effective_chat.send_photo(
+                                photo=f,
+                                read_timeout=30,
+                                write_timeout=30
+                            )
+                    sent += 1
+                    
+                    # Clean up file
+                    try:
+                        file_path.unlink()
+                    except:
+                        pass
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to send story: {e}")
+                    continue
+            
+            # Final message
+            if lang == 'ru':
+                caption = f"📥 Скачано {sent} сторис через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
+            else:
+                caption = f"📥 Downloaded {sent} stories via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
+            
+            await loading_msg.edit_text(caption)
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"All stories download failed: {error_msg}")
+            
+            if lang == 'ru':
+                await loading_msg.edit_text(f"❌ Ошибка: {error_msg}")
+            else:
+                await loading_msg.edit_text(f"❌ Error: {error_msg}")

@@ -1,8 +1,10 @@
 """Instagram downloader using Cobalt API with alternative services and yt-dlp fallback"""
 
 import re
+import os
 import logging
 import asyncio
+import aiohttp
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 import yt_dlp
@@ -15,7 +17,6 @@ from ..utils.instagram_stories_service import instagram_stories_service
 
 logger = logging.getLogger(__name__)
 
-# Timeout for Cobalt operations (seconds)
 COBALT_TIMEOUT = 25
 
 
@@ -30,7 +31,6 @@ class InstagramDownloader(BaseDownloader):
             'quiet': True,
             'no_warnings': True,
         })
-        self._metadata_template = ""  # No metadata, dev credit added in download_manager
 
     def _extract_shortcode(self, url: str) -> Optional[str]:
         """Extract shortcode from Instagram URL"""
@@ -39,7 +39,7 @@ class InstagramDownloader(BaseDownloader):
             r'instagram\.com/reel/([A-Za-z0-9_-]+)',
             r'instagram\.com/reels/([A-Za-z0-9_-]+)',
             r'instagram\.com/tv/([A-Za-z0-9_-]+)',
-            r'instagram\.com/stories/[^/]+/(\d+)',  # Stories have numeric IDs
+            r'instagram\.com/stories/[^/]+/(\d+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, url)
@@ -47,9 +47,24 @@ class InstagramDownloader(BaseDownloader):
                 return match.group(1)
         return None
 
+    def _extract_username(self, url: str) -> Optional[str]:
+        """Extract username from Instagram URL"""
+        match = re.search(r'instagram\.com/stories/([^/]+)', url)
+        if match:
+            return match.group(1)
+        return None
+
     def _is_story_url(self, url: str) -> bool:
         """Check if URL is an Instagram Story"""
         return '/stories/' in url
+
+    def _is_all_stories_url(self, url: str) -> bool:
+        """Check if URL is for all stories (no specific story ID)"""
+        if '/stories/' not in url:
+            return False
+        # URL like instagram.com/stories/username/ without story ID
+        match = re.search(r'instagram\.com/stories/([^/]+)/?$', url)
+        return match is not None
 
     def platform_id(self) -> str:
         return 'instagram'
@@ -57,67 +72,193 @@ class InstagramDownloader(BaseDownloader):
     def can_handle(self, url: str) -> bool:
         return any(x in url for x in ["instagram.com", "instagr.am"])
 
-    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool]:
+    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool, Optional[list]]:
         """
-        Try to get direct URL for fast sending (without downloading to server).
-        Returns: (direct_url, metadata, is_audio, audio_url, is_photo)
+        Get direct URL for fast sending.
+        Returns: (direct_url, metadata, is_audio, audio_url, is_photo, all_items)
         """
+        # For all stories URL - need to download all
+        if self._is_all_stories_url(url):
+            return None, None, False, None, False, None
+        
         try:
-            # Try Cobalt to get direct URL
             result = await asyncio.wait_for(
                 cobalt.request(url),
                 timeout=10
             )
             
-            if result.success and result.url:
-                metadata = ""  # No metadata, dev credit added in download_manager
-                is_audio = result.url.endswith(('.mp3', '.m4a', '.wav'))
-                is_photo = result.url.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
-                logger.info(f"[Instagram] Got direct URL from Cobalt (photo={is_photo})")
-                return result.url, metadata, is_audio, None, is_photo
+            if result.success:
+                # Handle picker (carousel/multiple items)
+                if result.picker and len(result.picker) > 0:
+                    all_items = []
+                    for item in result.picker:
+                        item_url = item.get('url', '')
+                        item_type = self._detect_media_type(item_url)
+                        all_items.append({
+                            'url': item_url,
+                            'type': item_type
+                        })
+                    
+                    first_url = all_items[0]['url']
+                    is_photo = all_items[0]['type'] == 'photo'
+                    logger.info(f"[Instagram] Got picker with {len(all_items)} items")
+                    return first_url, "", False, None, is_photo, all_items
+                
+                elif result.url:
+                    media_type = self._detect_media_type(result.url)
+                    is_photo = media_type == 'photo'
+                    is_audio = media_type == 'audio'
+                    logger.info(f"[Instagram] Got direct URL (type={media_type})")
+                    return result.url, "", is_audio, None, is_photo, None
                 
         except Exception as e:
             logger.debug(f"[Instagram] get_direct_url failed: {e}")
         
-        return None, None, False, None, False
+        return None, None, False, None, False, None
+
+    def _detect_media_type(self, url: str) -> str:
+        """Detect media type from URL"""
+        url_lower = url.lower()
+        
+        # Check file extension
+        if any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.webp', '.heic']):
+            return 'photo'
+        if any(ext in url_lower for ext in ['.mp4', '.mov', '.webm', '.m4v']):
+            return 'video'
+        if any(ext in url_lower for ext in ['.mp3', '.m4a', '.wav', '.ogg', '.opus']):
+            return 'audio'
+        
+        # Check URL patterns
+        if 'scontent' in url_lower and 'video' not in url_lower:
+            # Instagram CDN - check for video indicators
+            if '_n.jpg' in url_lower or 'e35/' in url_lower:
+                return 'photo'
+        
+        # Default to video for Instagram
+        return 'video'
+
+    async def _detect_media_type_by_headers(self, url: str) -> str:
+        """Detect media type by checking HTTP headers"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.head(
+                    url,
+                    headers={'User-Agent': 'Mozilla/5.0'},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                    allow_redirects=True
+                ) as response:
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    
+                    if 'image' in content_type:
+                        return 'photo'
+                    elif 'video' in content_type:
+                        return 'video'
+                    elif 'audio' in content_type:
+                        return 'audio'
+        except:
+            pass
+        
+        return self._detect_media_type(url)
 
     async def get_formats(self, url: str) -> List[Dict]:
         """Get available formats"""
         self.update_progress('status_getting_info', 0)
         
-        # Try Cobalt first
         result = await cobalt.request(url)
         if result.success:
             self.update_progress('status_getting_info', 100)
             return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
         
-        # Fallback to yt-dlp
         logger.info(f"[Instagram] Cobalt failed ({result.error}), trying yt-dlp")
         try:
             def extract():
                 with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                     return ydl.extract_info(url, download=False)
             
-            _ = await asyncio.to_thread(extract)
+            await asyncio.to_thread(extract)
             self.update_progress('status_getting_info', 100)
-            
             return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
             
         except Exception as e:
             logger.error(f"[Instagram] Format error: {e}")
-            # Even if format extraction fails, we can try downloading
             return [{'id': 'best', 'quality': 'Best', 'ext': 'mp4'}]
 
+    async def download_all_stories(self, url: str) -> List[Tuple[str, Path, str]]:
+        """
+        Download all stories from a user.
+        Returns: List of (metadata, file_path, media_type)
+        """
+        username = self._extract_username(url)
+        if not username:
+            raise DownloadError("Не удалось определить username")
+        
+        logger.info(f"[Instagram] Downloading all stories for @{username}")
+        
+        download_dir = Path(__file__).parent.parent.parent / "downloads"
+        download_dir.mkdir(exist_ok=True)
+        
+        # Get all stories
+        stories = await instagram_stories_service.get_stories(url)
+        if not stories:
+            raise DownloadError(f"Не найдено сторис у @{username}. Возможно, аккаунт приватный или сторис нет.")
+        
+        logger.info(f"[Instagram] Found {len(stories)} stories for @{username}")
+        
+        downloaded = []
+        for i, story in enumerate(stories):
+            media_url = story.get('url')
+            if not media_url:
+                continue
+            
+            try:
+                # Detect type
+                media_type = await self._detect_media_type_by_headers(media_url)
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        media_url,
+                        headers={'User-Agent': 'Mozilla/5.0'},
+                        timeout=aiohttp.ClientTimeout(total=60)
+                    ) as response:
+                        if response.status != 200:
+                            continue
+                        
+                        content = await response.read()
+                        
+                        # Double-check type by content
+                        if len(content) > 8 and content[4:8] == b'ftyp':
+                            media_type = 'video'
+                        
+                        ext = 'mp4' if media_type == 'video' else 'jpg'
+                        filename = f"story_{username}_{i+1}_{os.urandom(3).hex()}.{ext}"
+                        file_path = download_dir / filename
+                        
+                        with open(file_path, 'wb') as f:
+                            f.write(content)
+                        
+                        if file_path.exists() and file_path.stat().st_size > 500:
+                            downloaded.append(("", file_path, media_type))
+                            logger.info(f"[Instagram] Downloaded story {i+1}/{len(stories)}: {media_type}")
+                        
+            except Exception as e:
+                logger.warning(f"[Instagram] Failed to download story {i+1}: {e}")
+                continue
+        
+        if not downloaded:
+            raise DownloadError("Не удалось скачать ни одну сторис")
+        
+        return downloaded
+
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download video - Cobalt first, Stories service, JS fallback, alternative APIs, then yt-dlp"""
-        shortcode = self._extract_shortcode(url) or 'video'
+        """Download video/photo - Cobalt first, then fallbacks"""
+        shortcode = self._extract_shortcode(url) or 'media'
         is_story = self._is_story_url(url)
         logger.info(f"[Instagram] Downloading: {shortcode} (story: {is_story})")
         
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
         
-        # === 0. For Stories - try dedicated stories service first ===
+        # === Stories handling ===
         if is_story:
             self.update_progress('status_downloading', 5)
             logger.info("[Instagram] Story detected, trying stories service...")
@@ -131,58 +272,87 @@ class InstagramDownloader(BaseDownloader):
                 
                 if file_path and file_path.exists():
                     logger.info("[Instagram] Story downloaded via stories service")
-                    metadata = ""  # No metadata, dev credit added in download_manager
-                    return metadata, file_path
+                    return "", file_path
             except Exception as e:
                 logger.warning(f"[Instagram] Stories service failed: {e}")
         
-        # === 1. Try Cobalt with timeout ===
+        # === 1. Try Cobalt ===
         self.update_progress('status_downloading', 10)
-        cobalt_success = False
         
         try:
-            filename, file_path = await asyncio.wait_for(
-                cobalt.download(
-                    url, 
-                    download_dir,
-                    progress_callback=self.update_progress
-                ),
+            result = await asyncio.wait_for(
+                cobalt.request(url),
                 timeout=COBALT_TIMEOUT
             )
             
-            if file_path and file_path.exists():
-                cobalt_success = True
-                metadata = ""  # No metadata, dev credit added in download_manager
-                return metadata, file_path
+            if result.success:
+                download_url = result.url
+                
+                # Handle picker
+                if result.picker and len(result.picker) > 0:
+                    download_url = result.picker[0].get('url')
+                
+                if download_url:
+                    # Detect type
+                    media_type = await self._detect_media_type_by_headers(download_url)
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            download_url,
+                            headers={'User-Agent': 'Mozilla/5.0'},
+                            timeout=aiohttp.ClientTimeout(total=120)
+                        ) as response:
+                            if response.status == 200:
+                                content = await response.read()
+                                
+                                # Check content for type
+                                if len(content) > 8 and content[4:8] == b'ftyp':
+                                    media_type = 'video'
+                                
+                                ext = 'mp4' if media_type == 'video' else 'jpg'
+                                filename = result.filename or f"instagram_{shortcode}.{ext}"
+                                
+                                # Fix extension if needed
+                                if media_type == 'photo' and filename.endswith('.mp4'):
+                                    filename = filename.replace('.mp4', '.jpg')
+                                elif media_type == 'video' and filename.endswith('.jpg'):
+                                    filename = filename.replace('.jpg', '.mp4')
+                                
+                                file_path = download_dir / filename
+                                
+                                with open(file_path, 'wb') as f:
+                                    f.write(content)
+                                
+                                if file_path.exists() and file_path.stat().st_size > 500:
+                                    logger.info(f"[Instagram] Downloaded via Cobalt: {media_type}")
+                                    return "", file_path
                 
         except asyncio.TimeoutError:
-            logger.warning(f"[Instagram] Cobalt timeout after {COBALT_TIMEOUT}s, trying JS fallback")
+            logger.warning(f"[Instagram] Cobalt timeout")
         except Exception as e:
-            logger.warning(f"[Instagram] Cobalt error: {e}, trying JS fallback")
+            logger.warning(f"[Instagram] Cobalt error: {e}")
         
-        # === 2. Try JS API Fallback (only if Cobalt failed) ===
-        if not cobalt_success:
-            logger.info("[Instagram] Cobalt failed, trying JS API fallback")
-            self.update_progress('status_downloading', 15)
+        # === 2. Try JS API Fallback ===
+        logger.info("[Instagram] Trying JS API fallback")
+        self.update_progress('status_downloading', 30)
+        
+        try:
+            filename, file_path = await instagram_js_fallback.download(
+                url,
+                download_dir,
+                progress_callback=self.update_progress
+            )
             
-            try:
-                filename, file_path = await instagram_js_fallback.download(
-                    url,
-                    download_dir,
-                    progress_callback=self.update_progress
-                )
+            if file_path and file_path.exists():
+                logger.info("[Instagram] JS fallback success")
+                return "", file_path
                 
-                if file_path and file_path.exists():
-                    logger.info("[Instagram] JS fallback used successfully")
-                    metadata = ""  # No metadata, dev credit added in download_manager
-                    return metadata, file_path
-                    
-            except Exception as e:
-                logger.warning(f"[Instagram] JS fallback error: {e}")
+        except Exception as e:
+            logger.warning(f"[Instagram] JS fallback error: {e}")
         
-        # === 3. Try Alternative Instagram APIs ===
-        logger.info("[Instagram] JS fallback failed, trying alternative APIs")
-        self.update_progress('status_downloading', 20)
+        # === 3. Try Alternative APIs ===
+        logger.info("[Instagram] Trying alternative APIs")
+        self.update_progress('status_downloading', 50)
         
         filename, file_path = await instagram_api.download(
             url,
@@ -191,16 +361,14 @@ class InstagramDownloader(BaseDownloader):
         )
         
         if file_path and file_path.exists():
-            metadata = ""  # No metadata, dev credit added in download_manager
-            return metadata, file_path
+            return "", file_path
         
-        # === 4. Fallback to yt-dlp (skip for stories - requires auth) ===
+        # === 4. yt-dlp fallback (skip for stories) ===
         if is_story:
-            logger.warning("[Instagram] Stories service and Cobalt failed for story")
-            raise DownloadError("Не удалось скачать Story. Возможно, аккаунт приватный или Story истекла.")
+            raise DownloadError("Не удалось скачать Story. Возможно, аккаунт приватный.")
         
-        logger.info("[Instagram] Alternative APIs failed, trying yt-dlp")
-        self.update_progress('status_downloading', 40)
+        logger.info("[Instagram] Trying yt-dlp")
+        self.update_progress('status_downloading', 70)
         
         try:
             ydl_opts = self.ydl_opts.copy()
@@ -212,33 +380,18 @@ class InstagramDownloader(BaseDownloader):
             
             info = await asyncio.to_thread(download_video)
             
-            if not info:
-                raise DownloadError("Failed to download video")
-            
-            # Find file
-            filename = f"instagram_{shortcode}.mp4"  # Assuming mp4
-            file_path = download_dir / filename
-            
-            # If exact filename not found, try to find what yt-dlp saved
-            if not file_path.exists():
+            if info:
                 for f in download_dir.glob(f"instagram_{shortcode}.*"):
-                    file_path = f
-                    break
+                    if f.is_file():
+                        return "", f
             
-            if not file_path.exists():
-                raise DownloadError("File downloaded but not found")
-
-            metadata = ""  # No metadata, dev credit added in download_manager
-            return metadata, file_path
+            raise DownloadError("File not found after download")
             
         except Exception as e:
             error_msg = str(e)
             logger.error(f"[Instagram] Download failed: {error_msg}")
             
-            # Provide more helpful error messages
-            if "login" in error_msg.lower() or "log in" in error_msg.lower():
-                raise DownloadError("This content requires Instagram login. Try Reels or public posts.")
-            elif "video url" in error_msg.lower():
-                raise DownloadError("Could not extract media. This might be an image post or carousel.")
+            if "login" in error_msg.lower():
+                raise DownloadError("Контент требует авторизации")
             
-            raise DownloadError(f"Instagram download failed: {error_msg}")
+            raise DownloadError(f"Ошибка загрузки: {error_msg}")
