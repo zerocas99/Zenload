@@ -43,14 +43,26 @@ class YouTubeDownloader(BaseDownloader):
 
     def _setup_cookies_from_env(self):
         """Create cookies file from YOUTUBE_COOKIES environment variable"""
+        import base64
+        
         cookies_content = os.getenv('YOUTUBE_COOKIES')
         if cookies_content:
             try:
+                # Try to decode from base64 first
+                try:
+                    decoded = base64.b64decode(cookies_content).decode('utf-8')
+                    cookies_content = decoded
+                    logger.info("[YouTube] Cookies decoded from base64")
+                except:
+                    # Not base64, use as-is but fix newlines
+                    # Replace literal \n with actual newlines
+                    cookies_content = cookies_content.replace('\\n', '\n')
+                
                 cookies_dir = self.cookie_file.parent
                 cookies_dir.mkdir(exist_ok=True)
                 with open(self.cookie_file, 'w') as f:
                     f.write(cookies_content)
-                logger.info(f"[YouTube] Cookies loaded from environment variable")
+                logger.info(f"[YouTube] Cookies file created at {self.cookie_file}")
             except Exception as e:
                 logger.warning(f"[YouTube] Failed to write cookies: {e}")
 
