@@ -59,9 +59,19 @@ class InstagramDownloader(BaseDownloader):
         return '/stories/' in url
 
     def _is_all_stories_url(self, url: str) -> bool:
-        """Check if URL is for stories - always download all stories"""
-        # Any stories URL should download all stories
-        return '/stories/' in url
+        """Check if URL is for all stories (no specific story ID)"""
+        if '/stories/' not in url:
+            return False
+        # URL like instagram.com/stories/username/ without story ID
+        # If there's a story ID in URL, try Cobalt first for specific story
+        match = re.search(r'instagram\.com/stories/[^/]+/(\d+)', url)
+        # Return True only if NO specific story ID (download all)
+        return match is None
+
+    def _has_specific_story_id(self, url: str) -> bool:
+        """Check if URL has a specific story ID"""
+        match = re.search(r'instagram\.com/stories/[^/]+/(\d+)', url)
+        return match is not None
 
     def platform_id(self) -> str:
         return 'instagram'
@@ -250,15 +260,61 @@ class InstagramDownloader(BaseDownloader):
         """Download video/photo - Cobalt first, then fallbacks"""
         shortcode = self._extract_shortcode(url) or 'media'
         is_story = self._is_story_url(url)
-        logger.info(f"[Instagram] Downloading: {shortcode} (story: {is_story})")
+        has_specific_id = self._has_specific_story_id(url) if is_story else False
+        logger.info(f"[Instagram] Downloading: {shortcode} (story: {is_story}, specific_id: {has_specific_id})")
         
         download_dir = Path(__file__).parent.parent.parent / "downloads"
         download_dir.mkdir(exist_ok=True)
         
-        # === Stories handling ===
+        # === Stories with specific ID - try Cobalt first ===
+        if is_story and has_specific_id:
+            self.update_progress('status_downloading', 5)
+            logger.info("[Instagram] Specific story detected, trying Cobalt first...")
+            
+            try:
+                result = await asyncio.wait_for(
+                    cobalt.request(url),
+                    timeout=15
+                )
+                
+                if result.success and result.url:
+                    download_url = result.url
+                    media_type = await self._detect_media_type_by_headers(download_url)
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            download_url,
+                            headers={'User-Agent': 'Mozilla/5.0'},
+                            timeout=aiohttp.ClientTimeout(total=60)
+                        ) as response:
+                            if response.status == 200:
+                                content = await response.read()
+                                
+                                if len(content) > 8 and content[4:8] == b'ftyp':
+                                    media_type = 'video'
+                                
+                                ext = 'mp4' if media_type == 'video' else 'jpg'
+                                filename = f"story_{shortcode}.{ext}"
+                                file_path = download_dir / filename
+                                
+                                with open(file_path, 'wb') as f:
+                                    f.write(content)
+                                
+                                if file_path.exists() and file_path.stat().st_size > 500:
+                                    logger.info(f"[Instagram] Specific story downloaded via Cobalt")
+                                    return "", file_path
+                                    
+            except Exception as e:
+                logger.warning(f"[Instagram] Cobalt failed for specific story: {e}")
+            
+            # Cobalt failed - will fall through to download_all_stories via message_handlers
+            logger.info("[Instagram] Cobalt failed, will try downloading all stories...")
+            raise DownloadError("FALLBACK_TO_ALL_STORIES")
+        
+        # === Stories without specific ID - handled by message_handlers ===
         if is_story:
             self.update_progress('status_downloading', 5)
-            logger.info("[Instagram] Story detected, trying stories service...")
+            logger.info("[Instagram] Story without specific ID, trying stories service...")
             
             try:
                 filename, file_path = await instagram_stories_service.download(

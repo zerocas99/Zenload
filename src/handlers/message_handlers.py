@@ -229,12 +229,10 @@ class MessageHandlers:
             
             # Download with best quality (no format selection)
             download_task = asyncio.create_task(
-                self.download_manager.process_download(
+                self._download_with_fallback(
                     downloader, 
                     url, 
-                    update, 
-                    None,
-                    'best'
+                    update
                 )
             )
             
@@ -259,6 +257,33 @@ class MessageHandlers:
                     await status_message.delete()
                 except:
                     pass
+
+    async def _download_with_fallback(self, downloader, url: str, update: Update):
+        """Download with fallback to all stories for Instagram"""
+        from ..downloaders.base import DownloadError
+        
+        try:
+            await self.download_manager.process_download(
+                downloader, 
+                url, 
+                update, 
+                None,
+                'best'
+            )
+        except DownloadError as e:
+            if str(e) == "FALLBACK_TO_ALL_STORIES":
+                # Fallback to downloading all stories
+                logger.info(f"Falling back to all stories for {url}")
+                await self._process_all_stories(url, update, downloader)
+            else:
+                raise
+        except Exception as e:
+            # Check if it's the fallback error wrapped
+            if "FALLBACK_TO_ALL_STORIES" in str(e):
+                logger.info(f"Falling back to all stories for {url}")
+                await self._process_all_stories(url, update, downloader)
+            else:
+                raise
 
     async def _process_all_stories(self, url: str, update: Update, downloader):
         """Process all Instagram stories from a user"""

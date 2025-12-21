@@ -444,6 +444,13 @@ class DownloadWorker:
 
         except DownloadError as e:
             error_message = str(e)
+            
+            # Special case: Instagram story fallback to all stories
+            if error_message == "FALLBACK_TO_ALL_STORIES":
+                logger.info("Instagram story fallback - downloading all stories")
+                # This will be handled by message_handlers
+                raise
+            
             await update.effective_message.reply_text(
                 self.get_message(user_id, 'download_failed', error=error_message)
             )
