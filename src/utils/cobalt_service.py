@@ -150,11 +150,6 @@ class CobaltService:
         
         if use_token and OFFICIAL_TOKEN:
             headers["Authorization"] = f"Bearer {OFFICIAL_TOKEN}"
-            headers["Origin"] = "https://cobalt.tools"
-            headers["Referer"] = "https://cobalt.tools/"
-        else:
-            headers["Origin"] = api_url.rstrip("/")
-            headers["Referer"] = api_url
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -162,10 +157,11 @@ class CobaltService:
                     api_url,
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=25),
-                    ssl=False  # Skip SSL verification for some instances
+                    timeout=aiohttp.ClientTimeout(total=30),
+                    ssl=False
                 ) as resp:
                     text = await resp.text()
+                    logger.debug(f"[Cobalt] Response from {api_url}: {text[:200]}")
                     if text.strip().startswith('<'):
                         return None  # HTML/Cloudflare page
                     return json.loads(text)
@@ -176,14 +172,19 @@ class CobaltService:
         return None
 
     async def request(self, url: str, **kwargs) -> CobaltResult:
+        # Cobalt API v11 format
         payload = {
             "url": url,
             "videoQuality": kwargs.get("video_quality", "1080"),
             "audioFormat": kwargs.get("audio_format", "mp3"),
             "downloadMode": kwargs.get("download_mode", "auto"),
-            "tiktokFullAudio": True,
-            "twitterGif": True,
         }
+        
+        # Add optional fields only if needed
+        if kwargs.get("tiktok_full_audio"):
+            payload["tiktokFullAudio"] = True
+        if kwargs.get("twitter_gif"):
+            payload["twitterGif"] = True
         
         # 1. Try SELF-HOSTED Cobalt first (most reliable!)
         if SELF_HOSTED_COBALT:
