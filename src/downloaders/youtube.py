@@ -88,15 +88,14 @@ class YouTubeDownloader(BaseDownloader):
             'no_warnings': True,
             'quiet': True,
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
                 'Accept': '*/*',
                 'Accept-Language': 'en-US,en;q=0.9'
             },
             'extractor_args': {
                 'youtube': {
-                    # Use web_embedded - doesn't require PO Token, only embeddable videos
-                    # Fallback to tv_embedded which also doesn't require PO Token
-                    'player_client': ['web_embedded', 'tv_embedded'],
+                    # web_safari provides HLS formats that don't require PO Token
+                    'player_client': ['web_safari'],
                 }
             },
             'socket_timeout': 30,
@@ -301,14 +300,14 @@ class YouTubeDownloader(BaseDownloader):
             self.update_progress('status_downloading', 10)
             processed_url = self.preprocess_url(url)
             
-            # Get info first
+            # Get info first with web_safari - provides HLS without PO Token
             info_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'skip_download': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['web_embedded', 'tv_embedded'],
+                        'player_client': ['web_safari'],
                     }
                 },
             }
@@ -330,7 +329,7 @@ class YouTubeDownloader(BaseDownloader):
             
             self.update_progress('status_downloading', 30)
             
-            # Download as audio - use any available audio format
+            # Download as audio with web_safari
             audio_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
@@ -338,7 +337,7 @@ class YouTubeDownloader(BaseDownloader):
                 'no_warnings': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['web_embedded', 'tv_embedded'],
+                        'player_client': ['web_safari'],
                     }
                 },
             }
