@@ -30,19 +30,23 @@ INSTANCES_CACHE_TTL = 3600  # 1 hour
 OFFICIAL_API = "https://api.cobalt.tools/"
 OFFICIAL_TOKEN = os.getenv("COBALT_API_TOKEN", "")
 
-# Fallback instances
-FALLBACK_INSTANCES = [
-    "https://cobalt-backend.canine.tools/",
-    "https://cobalt-api.kwiatekmiki.com/",
-    "https://capi.3kh0.net/",
-    "https://cobalt-api.meowing.de/",
+# Fallback instances - ORDERED BY YOUTUBE SUPPORT
+# Instances that support YouTube should be first!
+YOUTUBE_INSTANCES = [
+    "https://cobalt-api.meowing.de/",  # YouTube: true, score: 96
+    "https://capi.3kh0.net/",           # YouTube: true, score: 76
+]
+
+# Instances that DON'T support YouTube (for other platforms)
+OTHER_INSTANCES = [
     "https://kityune.imput.net/",
+    "https://blossom.imput.net/",
     "https://nachos.imput.net/",
     "https://sunny.imput.net/",
-    "https://blossom.imput.net/",
-    "https://cobalt-7.kwiatekmiki.com/",
-    "https://downloadapi.stuff.solutions/",
+    "https://cobalt-backend.canine.tools/",  # YouTube: error.api.youtube.login
 ]
+
+FALLBACK_INSTANCES = YOUTUBE_INSTANCES + OTHER_INSTANCES
 
 # Supported services
 COBALT_SERVICES = {
@@ -119,21 +123,31 @@ class CobaltService:
             pass
         return FALLBACK_INSTANCES.copy()
     
-    async def _get_instances(self) -> List[str]:
+    async def _get_instances(self, url: str = None) -> List[str]:
+        """Get instances, prioritizing YouTube-supporting ones for YouTube URLs"""
         now = time.time()
         if not self._instances or (now - self._instances_updated) > INSTANCES_CACHE_TTL:
             fetched = await self._fetch_instances()
             self._instances = list(set(fetched + FALLBACK_INSTANCES))
             self._instances_updated = now
             self._failed_instances.clear()
-            random.shuffle(self._instances)
         
         available = [i for i in self._instances if i not in self._failed_instances]
         if not available:
             self._failed_instances.clear()
             available = self._instances.copy()
+        
+        # For YouTube URLs, prioritize YouTube-supporting instances
+        is_youtube = url and any(d in url.lower() for d in ['youtube.com', 'youtu.be', 'music.youtube.com'])
+        if is_youtube:
+            # Put YouTube instances first, don't shuffle them
+            youtube_first = [i for i in YOUTUBE_INSTANCES if i in available]
+            others = [i for i in available if i not in YOUTUBE_INSTANCES]
+            random.shuffle(others)
+            return youtube_first + others
+        else:
             random.shuffle(available)
-        return available
+            return available
 
     async def _make_request(self, api_url: str, payload: dict, use_token: bool = False) -> Optional[dict]:
         payload_json = json.dumps(payload)
@@ -187,7 +201,7 @@ class CobaltService:
                     return CobaltResult(success=False, error=data.get("error", {}).get("code"))
 
         # 2. Try Public Instances (Fallback)
-        instances = await self._get_instances()
+        instances = await self._get_instances(url)
         max_attempts = 5
         
         for attempt in range(min(max_attempts, len(instances))):
