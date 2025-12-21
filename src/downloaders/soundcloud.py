@@ -126,4 +126,4 @@ class SoundcloudDownloader(BaseDownloader):
             return metadata, file_path
         except Exception as e:
             logger.error(f"Error downloading from SoundCloud: {e}", exc_info=True)
-            raise DownloadError(f"Download error: {
+            raise DownloadError(f"Download error: {e}")
