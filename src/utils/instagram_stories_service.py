@@ -277,32 +277,50 @@ class InstagramStoriesService:
                     }]
             
             # Priority 3: Match by thumbnail story ID
-            # BUT verify that the main URL doesn't contain a DIFFERENT story_id
-            other_story_ids = set()
-            for item_data in all_items_data:
-                if item_data['thumb_story_id'] and item_data['thumb_story_id'] != story_id:
-                    other_story_ids.add(item_data['thumb_story_id'])
+            # Group items by thumb_story_id and find the one with matching URL
+            # The API returns items where thumbnail identifies the story, but URL might be mismatched
             
+            # First, try to find an item where BOTH thumbnail AND URL belong to the same story
             for item_data in all_items_data:
                 if item_data['thumb_story_id'] == story_id:
-                    logger.info(f"[Stories] Found story_id via thumbnail JWT at index {item_data['idx']}")
+                    # Check if URL also belongs to this story (url_story_id matches or is None)
+                    if item_data['url_story_id'] is None or item_data['url_story_id'] == story_id:
+                        # Additional check: make sure URL doesn't contain another story's ID
+                        url_belongs_to_other = False
+                        if item_data['original_url']:
+                            for other_item in all_items_data:
+                                if other_item['thumb_story_id'] and other_item['thumb_story_id'] != story_id:
+                                    # Check if this other story's ID appears in our URL
+                                    other_id = other_item['thumb_story_id']
+                                    other_url_id = other_item.get('url_story_id')
+                                    if other_url_id and other_url_id in (item_data.get('url_story_id') or ''):
+                                        url_belongs_to_other = True
+                                        break
+                        
+                        if not url_belongs_to_other:
+                            logger.info(f"[Stories] Found story_id via thumbnail JWT at index {item_data['idx']}")
+                            logger.info(f"[Stories] Using URL: {item_data['url'][:100]}...")
+                            logger.info(f"[Stories] Original URL decoded: {item_data['original_url'][:100] if item_data['original_url'] else 'None'}...")
+                            logger.info(f"[Stories] Thumb original: {item_data['thumb_original'][:100] if item_data['thumb_original'] else 'None'}...")
+                            
+                            original_url = item_data['original_url'] or item_data['thumb_original']
+                            is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower() or '/o1/v/' in original_url)
+                            if not is_video:
+                                is_video = '/v/' in item_data['url'] or 'video' in item_data['url'].lower()
+                            return [{
+                                'type': 'video' if is_video else 'photo',
+                                'url': item_data['url'],
+                                'index': item_data['idx'],
+                                'matched': True
+                            }]
+            
+            # If no clean match found, just use the first item with matching thumbnail
+            # This is a fallback - the API data might be inconsistent
+            for item_data in all_items_data:
+                if item_data['thumb_story_id'] == story_id:
+                    logger.warning(f"[Stories] Using fallback: thumbnail match at index {item_data['idx']} (URL may be wrong)")
                     logger.info(f"[Stories] Using URL: {item_data['url'][:100]}...")
-                    logger.info(f"[Stories] Original URL decoded: {item_data['original_url'][:100] if item_data['original_url'] else 'None'}...")
-                    logger.info(f"[Stories] Thumb original: {item_data['thumb_original'][:100] if item_data['thumb_original'] else 'None'}...")
                     
-                    # Check if original URL contains a DIFFERENT story's ID
-                    url_has_wrong_story = False
-                    if item_data['original_url']:
-                        for other_id in other_story_ids:
-                            if other_id in item_data['original_url']:
-                                url_has_wrong_story = True
-                                logger.warning(f"[Stories] Main URL at index {item_data['idx']} contains wrong story_id {other_id}, skipping")
-                                break
-                    
-                    if url_has_wrong_story:
-                        continue  # Try next item with same thumb_story_id
-                    
-                    # Use this item's URL
                     original_url = item_data['original_url'] or item_data['thumb_original']
                     is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower() or '/o1/v/' in original_url)
                     if not is_video:
@@ -499,7 +517,14 @@ class InstagramStoriesService:
         
         # If we have specific story_id, try services that can handle specific stories
         if story_id:
-            # Try iGram first - it accepts full URL with story_id
+            # Try FastDL first - it might handle specific stories better
+            logger.info(f"[Stories] Trying FastDL for specific story_id={story_id}")
+            stories = await self._try_fastdl(url)
+            if stories:
+                logger.info(f"[Stories] Got {len(stories)} stories from FastDL")
+                return stories
+            
+            # Try iGram
             logger.info(f"[Stories] Trying iGram for specific story_id={story_id}")
             stories = await self._try_igram(url)
             if stories:
@@ -554,6 +579,48 @@ class InstagramStoriesService:
         
         logger.warning("[Stories] All services failed")
         return None
+    
+    async def _try_fastdl(self, url: str) -> Optional[List[Dict]]:
+        """Try fastdl.app API"""
+        try:
+            api_url = "https://fastdl.app/api/convert"
+            logger.info(f"[FastDL] Requesting for URL: {url[:80]}...")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    data={"url": url},
+                    headers={
+                        'User-Agent': self._user_agent,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Origin': 'https://fastdl.app',
+                        'Referer': 'https://fastdl.app/'
+                    },
+                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
+                ) as response:
+                    logger.info(f"[FastDL] Response status: {response.status}")
+                    if response.status != 200:
+                        logger.warning(f"[FastDL] API failed: {response.status}")
+                        return None
+                    
+                    data = await response.json()
+                    logger.info(f"[FastDL] Response keys: {list(data.keys()) if isinstance(data, dict) else 'not dict'}")
+                    
+                    # Extract URL from response
+                    media_url = self._extract_url_from_data(data)
+                    if media_url:
+                        is_video = '.mp4' in media_url.lower() or 'video' in media_url.lower()
+                        logger.info(f"[FastDL] Found URL: {media_url[:80]}...")
+                        return [{
+                            'type': 'video' if is_video else 'photo',
+                            'url': media_url
+                        }]
+                    
+                    return None
+                    
+        except Exception as e:
+            logger.warning(f"[FastDL] Error: {e}")
+            return None
     
     async def _try_storiesig(self, username: str, story_id: str = None) -> Optional[List[Dict]]:
         """Try storiesig.info API"""
