@@ -273,28 +273,17 @@ class YouTubeDownloader(BaseDownloader):
                 raise DownloadError(f"Ошибка загрузки: {error_msg}")
 
     async def _download_with_ytdlp(self, url: str, download_dir: Path, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download using yt-dlp with NO-COOKIES strategy (mobile client emulation)"""
+        """Download using yt-dlp with cookies"""
         self.update_progress('status_downloading', 10)
         
-        # Format selection optimized for Telegram (max 2GB, prefer mp4)
+        # Simplified format selection - let yt-dlp choose best available
         if format_id == 'audio':
-            format_str = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
+            format_str = 'bestaudio/best'
         elif format_id and format_id != 'best':
-            format_str = (
-                f'bestvideo[height<={format_id}][ext=mp4]+bestaudio[ext=m4a]/'
-                f'bestvideo[height<={format_id}]+bestaudio/'
-                f'best[height<={format_id}][ext=mp4]/'
-                f'best[height<={format_id}]/best'
-            )
+            format_str = f'best[height<={format_id}]/best'
         else:
-            format_str = (
-                'bestvideo[ext=mp4][filesize<2G]+bestaudio[ext=m4a]/'
-                'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo+bestaudio/best[ext=mp4]/best'
-            )
+            format_str = 'best[ext=mp4]/best'
         
-        # NO-COOKIES STRATEGY: Emulate mobile clients (Android/iOS)
-        # This bypasses most bot detection and throttling without needing cookies
         ydl_opts = {
             'format': format_str,
             'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
@@ -303,19 +292,6 @@ class YouTubeDownloader(BaseDownloader):
             'noplaylist': True,
             'ignoreerrors': False,
             'no_color': True,
-            'merge_output_format': 'mp4',
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }],
-            # ВАЖНО: Эмуляция мобильных клиентов для работы БЕЗ cookies
-            # Android/iOS клиенты считаются более "доверенными" YouTube
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'ios'],  # Сначала Android, потом iOS
-                    'player_skip': ['web', 'tv'],  # Пропускаем веб-клиент (самый палевный)
-                }
-            },
             # Network settings
             'socket_timeout': 30,
             'retries': 3,
@@ -327,12 +303,12 @@ class YouTubeDownloader(BaseDownloader):
             'geo_bypass_country': 'US',
         }
         
-        # Cookies используем только если они есть (опционально)
+        # Use cookies if available
         if self.cookie_file.exists():
             ydl_opts['cookiefile'] = str(self.cookie_file)
-            logger.info(f"[YouTube] Using cookies (optional): {self.cookie_file}")
+            logger.info(f"[YouTube] Using cookies: {self.cookie_file}")
         else:
-            logger.info("[YouTube] No cookies - using mobile client emulation")
+            logger.info("[YouTube] No cookies available")
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -359,40 +335,15 @@ class YouTubeDownloader(BaseDownloader):
                         
         except yt_dlp.utils.DownloadError as e:
             error_str = str(e)
-            logger.warning(f"[YouTube] Mobile client failed: {error_str}")
+            logger.error(f"[YouTube] yt-dlp error: {error_str}")
             
-            # FALLBACK: Если Android/iOS не сработали, пробуем web-клиент
-            if "Sign in" in error_str or "confirm" in error_str.lower():
-                logger.info("[YouTube] Trying web client fallback...")
-                try:
-                    ydl_opts['extractor_args'] = {
-                        'youtube': {
-                            'player_client': ['web'],
-                        }
-                    }
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = await asyncio.to_thread(ydl.extract_info, url, download=True)
-                        if info:
-                            filename = ydl.prepare_filename(info)
-                            file_path = Path(filename).resolve()
-                            if not file_path.exists():
-                                file_path = file_path.with_suffix('.mp4')
-                            if file_path.exists():
-                                logger.info(f"[YouTube] Web fallback succeeded: {file_path}")
-                                return "", file_path
-                except Exception as fallback_e:
-                    logger.error(f"[YouTube] Web fallback also failed: {fallback_e}")
-                
-                # Если и web не помог — это 18+ или Premium контент
-                raise DownloadError("Видео требует авторизации (18+ или Premium контент)")
-            
-            # Другие ошибки
+            # Specific error handling
             if "Private video" in error_str:
                 raise DownloadError("Это приватное видео")
             elif "Video unavailable" in error_str:
                 raise DownloadError("Видео недоступно")
-            elif "age" in error_str.lower():
-                raise DownloadError("Видео с возрастным ограничением (18+)")
+            elif "Sign in" in error_str or "age" in error_str.lower():
+                raise DownloadError("Видео требует авторизации (18+ или Premium)")
             else:
                 raise DownloadError(f"Ошибка загрузки: {error_str[:100]}")
                 
@@ -486,19 +437,12 @@ class YouTubeDownloader(BaseDownloader):
                 except Exception as e:
                     logger.warning(f"[YouTube] Piped audio failed: {e}")
             
-            # Fallback to yt-dlp with mobile client emulation
+            # Fallback to yt-dlp
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
-                # NO-COOKIES: Mobile client emulation
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android', 'ios'],
-                        'player_skip': ['web', 'tv'],
-                    }
-                },
                 'nocheckcertificate': True,
                 'geo_bypass': True,
             }
@@ -620,28 +564,18 @@ class YouTubeDownloader(BaseDownloader):
             
             # Fallback to yt-dlp only if Cobalt failed
             if not audio_path or not audio_path.exists():
-                logger.info("[YouTube Music] Trying yt-dlp fallback with mobile client...")
+                logger.info("[YouTube Music] Trying yt-dlp fallback...")
                 ydl_opts = {
                     'format': 'bestaudio/best',
                     'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
-                    'quiet': False,
-                    'no_warnings': False,
-                    'verbose': True,
-                    # NO-COOKIES: Mobile client emulation
-                    'extractor_args': {
-                        'youtube': {
-                            'player_client': ['android', 'ios'],
-                            'player_skip': ['web', 'tv'],
-                        }
-                    },
+                    'quiet': True,
+                    'no_warnings': True,
                     'nocheckcertificate': True,
                     'geo_bypass': True,
                 }
                 if self.cookie_file.exists():
                     ydl_opts['cookiefile'] = str(self.cookie_file)
-                    logger.info(f"[YouTube Music] Using cookies file (optional): {self.cookie_file}")
-                else:
-                    logger.info("[YouTube Music] No cookies - using mobile client emulation")
+                    logger.info(f"[YouTube Music] Using cookies: {self.cookie_file}")
                 
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
