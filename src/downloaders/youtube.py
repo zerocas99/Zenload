@@ -22,6 +22,12 @@ class YouTubeDownloader(BaseDownloader):
             self._cobalt = cobalt
         except:
             self._cobalt = None
+        # Import YouTube JS fallback (ytdl-core-enhanced)
+        try:
+            from ..utils.youtube_js_fallback import youtube_js
+            self._youtube_js = youtube_js
+        except:
+            self._youtube_js = None
 
     def platform_id(self) -> str:
         return 'youtube'
@@ -141,7 +147,40 @@ class YouTubeDownloader(BaseDownloader):
                             logger.info(f"[YouTube] Cobalt download completed: {file_path}")
                             return "", file_path
                 except Exception as e:
-                    logger.warning(f"[YouTube] Cobalt failed: {e}, trying yt-dlp...")
+                    logger.warning(f"[YouTube] Cobalt failed: {e}, trying JS fallback...")
+            
+            # Try YouTube JS fallback (ytdl-core-enhanced)
+            if self._youtube_js:
+                try:
+                    logger.info("[YouTube] Trying ytdl-core-enhanced via Node.js...")
+                    quality = format_id if format_id and format_id != 'best' else "highest"
+                    result = await self._youtube_js.get_video_url(processed_url, quality)
+                    
+                    if result.success and result.url:
+                        logger.info("[YouTube] JS fallback success, downloading...")
+                        self.update_progress('status_downloading', 30)
+                        
+                        import requests
+                        response = await asyncio.to_thread(
+                            requests.get, result.url,
+                            headers={'User-Agent': 'Mozilla/5.0'},
+                            timeout=300
+                        )
+                        
+                        if response.status_code == 200:
+                            video_id = processed_url.split('v=')[-1].split('&')[0] if 'v=' in processed_url else 'video'
+                            ext = result.container or 'mp4'
+                            filename = f"{video_id}.{ext}"
+                            file_path = download_dir / filename
+                            
+                            with open(file_path, 'wb') as f:
+                                f.write(response.content)
+                            
+                            self.update_progress('status_downloading', 100)
+                            logger.info(f"[YouTube] JS fallback download completed: {file_path}")
+                            return "", file_path
+                except Exception as e:
+                    logger.warning(f"[YouTube] JS fallback failed: {e}, trying yt-dlp...")
             
             # Fallback to yt-dlp
             return await self._download_with_ytdlp(processed_url, download_dir, format_id)
@@ -200,7 +239,7 @@ class YouTubeDownloader(BaseDownloader):
         raise DownloadError("Не удалось загрузить видео")
 
     async def _download_audio(self, url: str, download_dir: Path) -> Tuple[str, Path]:
-        """Download as audio only - uses Cobalt first"""
+        """Download as audio only - uses Cobalt first, then JS fallback"""
         try:
             self.update_progress('status_downloading', 10)
             
@@ -230,6 +269,34 @@ class YouTubeDownloader(BaseDownloader):
                             return "", file_path
                 except Exception as e:
                     logger.warning(f"[YouTube] Cobalt audio failed: {e}")
+            
+            # Try YouTube JS fallback
+            if self._youtube_js:
+                try:
+                    logger.info("[YouTube] Trying JS fallback for audio...")
+                    result = await self._youtube_js.get_audio_url(url)
+                    
+                    if result.success and result.url:
+                        import requests
+                        response = await asyncio.to_thread(
+                            requests.get, result.url,
+                            headers={'User-Agent': 'Mozilla/5.0'},
+                            timeout=180
+                        )
+                        
+                        if response.status_code == 200:
+                            video_id = url.split('v=')[-1].split('&')[0] if 'v=' in url else 'audio'
+                            ext = result.container or 'm4a'
+                            filename = f"{video_id}.{ext}"
+                            file_path = download_dir / filename
+                            
+                            with open(file_path, 'wb') as f:
+                                f.write(response.content)
+                            
+                            logger.info(f"[YouTube] JS fallback audio completed: {file_path}")
+                            return "", file_path
+                except Exception as e:
+                    logger.warning(f"[YouTube] JS fallback audio failed: {e}")
             
             # Fallback to yt-dlp
             ydl_opts = {
@@ -305,6 +372,33 @@ class YouTubeDownloader(BaseDownloader):
                             logger.info(f"[YouTube Music] Cobalt download completed: {audio_path}")
                 except Exception as e:
                     logger.warning(f"[YouTube Music] Cobalt failed: {e}")
+            
+            # Try YouTube JS fallback
+            if not audio_path or not audio_path.exists():
+                if self._youtube_js:
+                    try:
+                        logger.info("[YouTube Music] Trying JS fallback...")
+                        result = await self._youtube_js.get_audio_url(processed_url)
+                        
+                        if result.success and result.url:
+                            import requests
+                            response = await asyncio.to_thread(
+                                requests.get, result.url,
+                                headers={'User-Agent': 'Mozilla/5.0'},
+                                timeout=180
+                            )
+                            
+                            if response.status_code == 200:
+                                ext = result.container or 'm4a'
+                                filename = f"{video_id}.{ext}"
+                                audio_path = download_dir / filename
+                                
+                                with open(audio_path, 'wb') as f:
+                                    f.write(response.content)
+                                
+                                logger.info(f"[YouTube Music] JS fallback completed: {audio_path}")
+                    except Exception as e:
+                        logger.warning(f"[YouTube Music] JS fallback failed: {e}")
             
             # Fallback to yt-dlp only if Cobalt failed
             if not audio_path or not audio_path.exists():
