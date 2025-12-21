@@ -22,18 +22,20 @@ class YouTubeDownloader(BaseDownloader):
             self._cobalt = cobalt
         except:
             self._cobalt = None
-        # Import YouTube JS fallback (ytdl-core-enhanced)
-        try:
-            from ..utils.youtube_js_fallback import youtube_js
-            self._youtube_js = youtube_js
-        except:
-            self._youtube_js = None
-        # Import Piped fallback
-        try:
-            from ..utils.piped_fallback import piped
-            self._piped = piped
-        except:
-            self._piped = None
+        # Import YouTube JS fallback (ytdl-core-enhanced) - DISABLED: YouTube blocks datacenter IPs
+        # try:
+        #     from ..utils.youtube_js_fallback import youtube_js
+        #     self._youtube_js = youtube_js
+        # except:
+        #     self._youtube_js = None
+        self._youtube_js = None  # Disabled - YouTube blocks datacenter IPs
+        # Import Piped fallback - DISABLED: Most instances are down
+        # try:
+        #     from ..utils.piped_fallback import piped
+        #     self._piped = piped
+        # except:
+        #     self._piped = None
+        self._piped = None  # Disabled - most instances are down
 
     def platform_id(self) -> str:
         return 'youtube'
