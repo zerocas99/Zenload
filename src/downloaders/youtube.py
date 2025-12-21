@@ -93,7 +93,8 @@ class YouTubeDownloader(BaseDownloader):
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],  # android first to bypass 403
+                    # Use tv client - doesn't require PO Token
+                    'player_client': ['tv', 'web'],
                     'player_skip': ['webpage', 'configs'],
                 }
             },
@@ -294,14 +295,14 @@ class YouTubeDownloader(BaseDownloader):
             self.update_progress('status_downloading', 10)
             processed_url = self.preprocess_url(url)
             
-            # Get info first with android client to bypass 403
+            # Get info first with tv client - doesn't require PO Token
             info_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'skip_download': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
+                        'player_client': ['tv', 'web'],
                     }
                 },
             }
@@ -323,7 +324,7 @@ class YouTubeDownloader(BaseDownloader):
             
             self.update_progress('status_downloading', 30)
             
-            # Download as audio with android client to bypass 403
+            # Download as audio with tv client - doesn't require PO Token
             audio_opts = {
                 'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
@@ -331,7 +332,7 @@ class YouTubeDownloader(BaseDownloader):
                 'no_warnings': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
+                        'player_client': ['tv', 'web'],
                     }
                 },
             }

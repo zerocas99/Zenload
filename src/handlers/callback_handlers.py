@@ -90,13 +90,15 @@ class CallbackHandlers:
         
         # Create fake update object for download manager
         class FakeUpdate:
-            def __init__(self, effective_user, effective_message):
+            def __init__(self, effective_user, effective_message, effective_chat):
                 self.effective_user = effective_user
                 self.effective_message = effective_message
+                self.effective_chat = effective_chat
 
         fake_update = FakeUpdate(
             type('User', (), {'id': user_id})(),
-            query.message
+            query.message,
+            query.message.chat
         )
         
         # Download with selected format
