@@ -60,52 +60,35 @@ class YouTubeDownloader(BaseDownloader):
         if processed_url in self._video_info_cache:
             return self._video_info_cache[processed_url]
         
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
-        if self.cookie_file.exists():
-            ydl_opts['cookiefile'] = str(self.cookie_file)
+        # Return basic info without calling yt-dlp (to avoid 403 errors)
+        # Cobalt will handle the actual download
+        video_id = None
+        if 'v=' in processed_url:
+            video_id = processed_url.split('v=')[-1].split('&')[0]
+        elif 'youtu.be/' in url:
+            video_id = url.split('youtu.be/')[-1].split('?')[0]
         
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await asyncio.to_thread(ydl.extract_info, processed_url, download=False)
-            if info:
-                result = {
-                    'title': info.get('title', 'Unknown'),
-                    'thumbnail': info.get('thumbnail'),
-                    'duration': info.get('duration', 0),
-                    'channel': info.get('channel') or info.get('uploader', 'Unknown'),
-                    'view_count': info.get('view_count', 0),
-                    'id': info.get('id'),
-                    'formats': info.get('formats', [])
-                }
-                self._video_info_cache[processed_url] = result
-                return result
-        except Exception as e:
-            logger.debug(f"[YouTube] get_video_info failed: {e}")
-        return {}
+        result = {
+            'title': 'YouTube Video',
+            'thumbnail': f'https://img.youtube.com/vi/{video_id}/maxresdefault.jpg' if video_id else None,
+            'duration': 0,
+            'channel': 'Unknown',
+            'view_count': 0,
+            'id': video_id,
+            'formats': []
+        }
+        self._video_info_cache[processed_url] = result
+        return result
 
     async def get_formats(self, url: str) -> List[Dict]:
-        """Get available formats for URL"""
-        try:
-            self.update_progress('status_getting_info', 0)
-            info = await self.get_video_info(url)
-            
-            if info and info.get('formats'):
-                formats = []
-                seen = set()
-                for f in info['formats']:
-                    height = f.get('height')
-                    if not height:
-                        continue
-                    quality = f"{height}p"
-                    if quality not in seen and height in [360, 480, 720, 1080, 1440, 2160]:
-                        formats.append({'id': str(height), 'quality': quality, 'ext': 'mp4'})
-                        seen.add(quality)
-                formats = sorted(formats, key=lambda x: int(x['id']), reverse=True)[:4]
-                return formats
-            raise DownloadError("Не удалось получить информацию о видео")
-        except Exception as e:
-            logger.error(f"[YouTube] Format extraction failed: {e}")
-            raise DownloadError(f"Ошибка при получении форматов: {str(e)}")
+        """Get available formats for URL - simplified, Cobalt handles quality"""
+        # Return standard formats - Cobalt will handle actual quality selection
+        return [
+            {'id': '1080', 'quality': '1080p', 'ext': 'mp4'},
+            {'id': '720', 'quality': '720p', 'ext': 'mp4'},
+            {'id': '480', 'quality': '480p', 'ext': 'mp4'},
+            {'id': '360', 'quality': '360p', 'ext': 'mp4'},
+        ]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
         """Download video/audio from URL - uses Cobalt first, then yt-dlp fallback"""
@@ -283,14 +266,17 @@ class YouTubeDownloader(BaseDownloader):
             self.update_progress('status_downloading', 10)
             processed_url = self.preprocess_url(url)
             
-            # Get info first
-            info = await self.get_video_info(url)
-            title = info.get('title', 'Unknown') if info else 'Unknown'
-            artist = info.get('channel', 'Unknown') if info else 'Unknown'
-            duration = info.get('duration', 0) if info else 0
-            view_count = info.get('view_count', 0) if info else 0
-            video_id = info.get('id', 'audio') if info else 'audio'
-            thumbnail_url = info.get('thumbnail') if info else None
+            # Extract video ID
+            video_id = None
+            if 'v=' in processed_url:
+                video_id = processed_url.split('v=')[-1].split('&')[0]
+            elif 'youtu.be/' in url:
+                video_id = url.split('youtu.be/')[-1].split('?')[0]
+            
+            if not video_id:
+                video_id = 'audio'
+            
+            thumbnail_url = f'https://img.youtube.com/vi/{video_id}/maxresdefault.jpg'
             
             self.update_progress('status_downloading', 30)
             
@@ -320,8 +306,9 @@ class YouTubeDownloader(BaseDownloader):
                 except Exception as e:
                     logger.warning(f"[YouTube Music] Cobalt failed: {e}")
             
-            # Fallback to yt-dlp
+            # Fallback to yt-dlp only if Cobalt failed
             if not audio_path or not audio_path.exists():
+                logger.info("[YouTube Music] Trying yt-dlp fallback...")
                 ydl_opts = {
                     'format': 'bestaudio/best',
                     'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
@@ -331,32 +318,24 @@ class YouTubeDownloader(BaseDownloader):
                 if self.cookie_file.exists():
                     ydl_opts['cookiefile'] = str(self.cookie_file)
                 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    await asyncio.to_thread(ydl.extract_info, processed_url, download=True)
-                
-                for ext in ['.m4a', '.mp3', '.webm', '.opus', '.mp4']:
-                    path = download_dir / f"{video_id}{ext}"
-                    if path.exists():
-                        audio_path = path
-                        break
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        await asyncio.to_thread(ydl.extract_info, processed_url, download=True)
+                    
+                    for ext in ['.m4a', '.mp3', '.webm', '.opus', '.mp4']:
+                        path = download_dir / f"{video_id}{ext}"
+                        if path.exists():
+                            audio_path = path
+                            break
+                except Exception as e:
+                    logger.warning(f"[YouTube Music] yt-dlp also failed: {e}")
             
             if audio_path and audio_path.exists():
-                logger.info(f"[YouTube Music] Downloaded: {title} - {artist}")
+                logger.info(f"[YouTube Music] Downloaded successfully")
                 self.update_progress('status_downloading', 100)
                 
-                # Format metadata
-                minutes = duration // 60
-                seconds = duration % 60
-                length = f"{minutes}:{seconds:02d}"
-                
-                if view_count >= 1_000_000:
-                    plays = f"{view_count/1_000_000:.1f}M"
-                elif view_count >= 1_000:
-                    plays = f"{view_count/1_000:.1f}K"
-                else:
-                    plays = str(view_count)
-                
-                metadata = f"{title} | By: {artist} | Length: {length} | Plays: {plays} | <a href=\"{url}\">Ссылка</a>"
+                # Basic metadata (we don't have full info without yt-dlp)
+                metadata = f"YouTube Music | <a href=\"{url}\">Ссылка</a>"
                 
                 # Return with thumbnail URL
                 if thumbnail_url:
@@ -364,7 +343,7 @@ class YouTubeDownloader(BaseDownloader):
                 
                 return metadata, audio_path, thumbnail_url
             
-            raise DownloadError("Не удалось найти скачанный файл")
+            raise DownloadError("Не удалось скачать музыку")
             
         except Exception as e:
             logger.error(f"[YouTube Music] Download failed: {e}")

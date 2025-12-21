@@ -98,14 +98,9 @@ class MessageHandlers:
 
     def _is_youtube_url(self, url: str) -> bool:
         """Check if URL is from YouTube (but NOT YouTube Music)"""
+        # Disable quality selection for YouTube - use Cobalt directly
         # YouTube Music should be treated as audio, not video with quality selection
-        if 'music.youtube.com' in url.lower():
-            return False
-        youtube_patterns = [
-            'youtube.com', 'youtu.be', 'youtube.com/shorts',
-            'youtube.com/watch', 'youtube.com/v/', 'youtube.com/embed/'
-        ]
-        return any(pattern in url.lower() for pattern in youtube_patterns)
+        return False  # Temporarily disable YouTube quality selection - Cobalt handles it
 
     async def _process_url(self, url: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Process URL from message or command"""
