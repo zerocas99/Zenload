@@ -5,6 +5,7 @@ from .tiktok import TikTokDownloader
 from .pinterest import PinterestDownloader
 from .youtube import YouTubeDownloader
 from .soundcloud import SoundcloudDownloader
+from .cobalt_platforms import CobaltPlatformDownloader
 
 
 class DownloaderFactory:
@@ -15,7 +16,8 @@ class DownloaderFactory:
         TikTokDownloader,
         PinterestDownloader,
         YouTubeDownloader,
-        SoundcloudDownloader
+        SoundcloudDownloader,
+        CobaltPlatformDownloader,  # VK, OK, Rutube, Facebook, Twitch, Bilibili, etc.
     ]
 
     @classmethod
