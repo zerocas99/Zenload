@@ -175,29 +175,51 @@ class YouTubeDownloader(BaseDownloader):
                     result = await self._cobalt.request(processed_url, video_quality=quality)
                     
                     if result.success and result.url:
-                        logger.info("[YouTube] Cobalt success, downloading...")
+                        logger.info(f"[YouTube] Cobalt success, downloading from: {result.url[:100]}...")
                         self.update_progress('status_downloading', 30)
                         
-                        # Download the file
-                        import requests
-                        response = await asyncio.to_thread(
-                            requests.get, result.url, 
-                            headers={'User-Agent': 'Mozilla/5.0'}, 
-                            timeout=300
-                        )
-                        
-                        if response.status_code == 200:
-                            # Extract video ID for filename
-                            video_id = processed_url.split('v=')[-1].split('&')[0] if 'v=' in processed_url else 'video'
-                            filename = result.filename or f"{video_id}.mp4"
-                            file_path = download_dir / filename
-                            
-                            with open(file_path, 'wb') as f:
-                                f.write(response.content)
-                            
-                            self.update_progress('status_downloading', 100)
-                            logger.info(f"[YouTube] Cobalt download completed: {file_path}")
-                            return "", file_path
+                        # Download the file using aiohttp with streaming
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                result.url,
+                                headers={
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                                    'Accept': '*/*',
+                                    'Accept-Encoding': 'identity',  # No compression for video
+                                },
+                                timeout=aiohttp.ClientTimeout(total=600, connect=30),
+                                allow_redirects=True
+                            ) as response:
+                                logger.info(f"[YouTube] Cobalt download response: status={response.status}, content-length={response.headers.get('content-length', 'unknown')}")
+                                
+                                if response.status == 200:
+                                    # Extract video ID for filename
+                                    video_id = processed_url.split('v=')[-1].split('&')[0] if 'v=' in processed_url else 'video'
+                                    filename = result.filename or f"{video_id}.mp4"
+                                    file_path = download_dir / filename
+                                    
+                                    # Stream download to file
+                                    total_size = 0
+                                    with open(file_path, 'wb') as f:
+                                        async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                                            if chunk:
+                                                f.write(chunk)
+                                                total_size += len(chunk)
+                                    
+                                    logger.info(f"[YouTube] Downloaded {total_size} bytes to {file_path}")
+                                    
+                                    # Validate file size
+                                    if total_size < 1000:  # Less than 1KB is suspicious
+                                        logger.warning(f"[YouTube] File too small ({total_size} bytes), Cobalt tunnel may have failed")
+                                        if file_path.exists():
+                                            file_path.unlink()
+                                        raise Exception("Downloaded file is too small, tunnel failed")
+                                    
+                                    self.update_progress('status_downloading', 100)
+                                    logger.info(f"[YouTube] Cobalt download completed: {file_path} ({total_size} bytes)")
+                                    return "", file_path
+                                else:
+                                    logger.warning(f"[YouTube] Cobalt download failed with status {response.status}")
                 except Exception as e:
                     logger.warning(f"[YouTube] Cobalt failed: {e}, trying JS fallback...")
             
@@ -366,23 +388,35 @@ class YouTubeDownloader(BaseDownloader):
                     result = await self._cobalt.request(url, download_mode="audio", audio_format="mp3")
                     
                     if result.success and result.url:
-                        import requests
-                        response = await asyncio.to_thread(
-                            requests.get, result.url,
-                            headers={'User-Agent': 'Mozilla/5.0'},
-                            timeout=180
-                        )
-                        
-                        if response.status_code == 200:
-                            video_id = url.split('v=')[-1].split('&')[0] if 'v=' in url else 'audio'
-                            filename = result.filename or f"{video_id}.mp3"
-                            file_path = download_dir / filename
-                            
-                            with open(file_path, 'wb') as f:
-                                f.write(response.content)
-                            
-                            logger.info(f"[YouTube] Cobalt audio download completed: {file_path}")
-                            return "", file_path
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                result.url,
+                                headers={
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                                    'Accept': '*/*',
+                                },
+                                timeout=aiohttp.ClientTimeout(total=300)
+                            ) as response:
+                                if response.status == 200:
+                                    video_id = url.split('v=')[-1].split('&')[0] if 'v=' in url else 'audio'
+                                    filename = result.filename or f"{video_id}.mp3"
+                                    file_path = download_dir / filename
+                                    
+                                    total_size = 0
+                                    with open(file_path, 'wb') as f:
+                                        async for chunk in response.content.iter_chunked(1024 * 1024):
+                                            if chunk:
+                                                f.write(chunk)
+                                                total_size += len(chunk)
+                                    
+                                    if total_size < 1000:
+                                        logger.warning(f"[YouTube] Audio file too small ({total_size} bytes)")
+                                        if file_path.exists():
+                                            file_path.unlink()
+                                        raise Exception("Audio file too small")
+                                    
+                                    logger.info(f"[YouTube] Cobalt audio completed: {file_path} ({total_size} bytes)")
+                                    return "", file_path
                 except Exception as e:
                     logger.warning(f"[YouTube] Cobalt audio failed: {e}")
             
@@ -496,21 +530,33 @@ class YouTubeDownloader(BaseDownloader):
                     result = await self._cobalt.request(processed_url, download_mode="audio", audio_format="mp3")
                     
                     if result.success and result.url:
-                        import requests
-                        response = await asyncio.to_thread(
-                            requests.get, result.url,
-                            headers={'User-Agent': 'Mozilla/5.0'},
-                            timeout=180
-                        )
-                        
-                        if response.status_code == 200:
-                            filename = result.filename or f"{video_id}.mp3"
-                            audio_path = download_dir / filename
-                            
-                            with open(audio_path, 'wb') as f:
-                                f.write(response.content)
-                            
-                            logger.info(f"[YouTube Music] Cobalt download completed: {audio_path}")
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                result.url,
+                                headers={
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                                    'Accept': '*/*',
+                                },
+                                timeout=aiohttp.ClientTimeout(total=300)
+                            ) as response:
+                                if response.status == 200:
+                                    filename = result.filename or f"{video_id}.mp3"
+                                    audio_path = download_dir / filename
+                                    
+                                    total_size = 0
+                                    with open(audio_path, 'wb') as f:
+                                        async for chunk in response.content.iter_chunked(1024 * 1024):
+                                            if chunk:
+                                                f.write(chunk)
+                                                total_size += len(chunk)
+                                    
+                                    if total_size < 1000:
+                                        logger.warning(f"[YouTube Music] File too small ({total_size} bytes)")
+                                        if audio_path.exists():
+                                            audio_path.unlink()
+                                        audio_path = None
+                                    else:
+                                        logger.info(f"[YouTube Music] Cobalt completed: {audio_path} ({total_size} bytes)")
                 except Exception as e:
                     logger.warning(f"[YouTube Music] Cobalt failed: {e}")
             
