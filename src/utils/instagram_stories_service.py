@@ -493,17 +493,25 @@ class InstagramStoriesService:
         story_id = self._extract_story_id(url)
         logger.info(f"[Stories] Getting stories for @{username}, story_id={story_id}")
         
-        # Try JS API first (most reliable - uses snapsave)
+        # If we have specific story_id, try StoriesIG first (returns proper IDs)
+        if story_id:
+            stories = await self._try_storiesig(username, story_id)
+            if stories:
+                logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
+                return stories
+        
+        # Try JS API (uses snapsave - good for all stories but has ID matching issues)
         stories = await self._try_js_api(url, story_id)
         if stories:
             logger.info(f"[Stories] Got {len(stories)} stories from JS API")
             return stories
         
-        # Try StoriesIG
-        stories = await self._try_storiesig(username, story_id)
-        if stories:
-            logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
-            return stories
+        # Try StoriesIG (if not tried above)
+        if not story_id:
+            stories = await self._try_storiesig(username, story_id)
+            if stories:
+                logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
+                return stories
         
         # Try iGram
         stories = await self._try_igram(url)
