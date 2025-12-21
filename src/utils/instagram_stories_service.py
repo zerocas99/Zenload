@@ -420,6 +420,12 @@ class InstagramStoriesService:
             logger.info(f"[Stories] Got {len(stories)} stories from JS API")
             return stories
         
+        # Try StoriesIG
+        stories = await self._try_storiesig(username, story_id)
+        if stories:
+            logger.info(f"[Stories] Got {len(stories)} stories from StoriesIG")
+            return stories
+        
         # Try iGram
         stories = await self._try_igram(url)
         if stories:
@@ -438,8 +444,103 @@ class InstagramStoriesService:
             logger.info(f"[Stories] Got {len(stories)} stories from SaveGram")
             return stories
         
+        # Try Instafinsta
+        stories = await self._try_instafinsta(url)
+        if stories:
+            logger.info(f"[Stories] Got {len(stories)} stories from Instafinsta")
+            return stories
+        
         logger.warning("[Stories] All services failed")
         return None
+    
+    async def _try_storiesig(self, username: str, story_id: str = None) -> Optional[List[Dict]]:
+        """Try storiesig.info API"""
+        if not username:
+            return None
+        
+        try:
+            api_url = f"https://storiesig.info/api/ig/story?url=https://www.instagram.com/stories/{username}/"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    api_url,
+                    headers={
+                        'User-Agent': self._user_agent,
+                        'Accept': 'application/json',
+                    },
+                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        logger.debug(f"[StoriesIG] API failed: {response.status}")
+                        return None
+                    
+                    data = await response.json()
+                    
+                    if not data.get('result'):
+                        logger.debug("[StoriesIG] No result in response")
+                        return None
+                    
+                    stories = []
+                    for item in data.get('result', []):
+                        media_url = item.get('url') or item.get('video_url') or item.get('image_url')
+                        if media_url:
+                            is_video = item.get('is_video', False) or '.mp4' in media_url
+                            item_id = str(item.get('pk', ''))
+                            
+                            story_item = {
+                                'type': 'video' if is_video else 'photo',
+                                'url': media_url,
+                                'id': item_id
+                            }
+                            
+                            # If looking for specific story
+                            if story_id and item_id == story_id:
+                                return [story_item]
+                            
+                            stories.append(story_item)
+                    
+                    return stories if stories else None
+                    
+        except Exception as e:
+            logger.debug(f"[StoriesIG] Error: {e}")
+            return None
+    
+    async def _try_instafinsta(self, url: str) -> Optional[List[Dict]]:
+        """Try instafinsta.com API"""
+        try:
+            api_url = "https://instafinsta.com/api/media"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    data={"url": url},
+                    headers={
+                        'User-Agent': self._user_agent,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Origin': 'https://instafinsta.com',
+                        'Referer': 'https://instafinsta.com/'
+                    },
+                    timeout=aiohttp.ClientTimeout(total=STORIES_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        logger.debug(f"[Instafinsta] API failed: {response.status}")
+                        return None
+                    
+                    data = await response.json()
+                    
+                    media_url = self._extract_url_from_data(data)
+                    if media_url:
+                        is_video = '.mp4' in media_url.lower() or 'video' in media_url.lower()
+                        return [{
+                            'type': 'video' if is_video else 'photo',
+                            'url': media_url
+                        }]
+                    
+                    return None
+                    
+        except Exception as e:
+            logger.debug(f"[Instafinsta] Error: {e}")
+            return None
 
     async def download(
         self, 
