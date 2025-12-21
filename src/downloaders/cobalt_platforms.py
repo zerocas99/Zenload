@@ -92,8 +92,8 @@ class CobaltPlatformDownloader(BaseDownloader):
     """Universal downloader for platforms supported by Cobalt with fast send"""
     
     def __init__(self):
+        self._detected_platform = None  # Must be set BEFORE super().__init__()
         super().__init__()
-        self._detected_platform = None
     
     def platform_id(self) -> str:
         return self._detected_platform or 'cobalt'
