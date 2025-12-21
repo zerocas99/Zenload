@@ -82,6 +82,13 @@ class SoundcloudDownloader(BaseDownloader):
         
         return f"{title} | By: {artist} | Length: {length} | Plays: {plays} | <a href=\"{permalink}\">Ссылка</a>"
 
+    def _get_hq_artwork_url(self, artwork_url: str) -> str:
+        """Get high quality artwork URL (500x500)"""
+        if not artwork_url:
+            return None
+        # SoundCloud artwork URLs have size in them like -large, -t500x500, etc.
+        return artwork_url.replace('-large', '-t500x500').replace('-small', '-t500x500')
+
     async def download(self, url: str, format_id: str = None) -> Tuple[str, Path]:
         try:
             self.update_progress("status_downloading", 5)
@@ -107,8 +114,15 @@ class SoundcloudDownloader(BaseDownloader):
 
             self.update_progress("status_downloading", 100)
 
-            # Return metadata for caption (no cover art embedding without ffmpeg)
+            # Get thumbnail URL
+            artwork_url = track_meta.get("artwork_url")
+            thumbnail_url = self._get_hq_artwork_url(artwork_url) if artwork_url else None
+
+            # Return metadata for caption with thumbnail
             metadata = self._format_metadata(track_meta, url)
+            if thumbnail_url:
+                metadata = f"THUMB:{thumbnail_url}|{metadata}"
+            
             return metadata, file_path
         except Exception as e:
             logger.error(f"Error downloading from SoundCloud: {e}", exc_info=True)

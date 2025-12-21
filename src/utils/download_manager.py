@@ -319,6 +319,29 @@ class DownloadWorker:
             metadata, file_path = result
             logger.info(f"Download completed. File path: {file_path}")
             
+            # Extract thumbnail URL and track info if present in metadata
+            thumbnail_url = None
+            track_title = None
+            track_performer = None
+            if metadata and metadata.startswith("THUMB:"):
+                parts = metadata.split("|", 1)
+                thumbnail_url = parts[0].replace("THUMB:", "")
+                metadata = parts[1] if len(parts) > 1 else ""
+            
+            # Extract title and performer from metadata for music player UI
+            # Format: "title | By: artist | Length: X:XX | Plays: XXK | <a href="url">Ссылка</a>"
+            if metadata and '| By:' in metadata:
+                try:
+                    meta_parts = metadata.split(' | ')
+                    if len(meta_parts) >= 2:
+                        track_title = meta_parts[0].strip()
+                        for part in meta_parts:
+                            if part.startswith('By:'):
+                                track_performer = part.replace('By:', '').strip()
+                                break
+                except:
+                    pass
+            
             # Determine file type by extension
             file_ext = file_path.suffix.lower()
             is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac', '.webm', '.opus']
@@ -357,13 +380,28 @@ class DownloadWorker:
             
             with open(file_path, 'rb') as file:
                 if is_audio_file:
-                    # SoundCloud and YouTube Music - send with reply
-                    # TikTok sounds - send without reply
+                    # SoundCloud and YouTube Music - send with reply, thumbnail, title, performer
                     if is_music_platform:
+                        # Download thumbnail for music player UI
+                        thumb_data = None
+                        if thumbnail_url:
+                            try:
+                                async with aiohttp.ClientSession() as thumb_session:
+                                    async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                        if resp.status == 200:
+                                            from io import BytesIO
+                                            thumb_data = BytesIO(await resp.read())
+                                            thumb_data.name = "thumb.jpg"
+                            except Exception as e:
+                                logger.debug(f"Failed to download thumbnail: {e}")
+                        
                         await update.effective_message.reply_audio(
                             audio=file,
                             caption=caption,
                             parse_mode='HTML',
+                            title=track_title,
+                            performer=track_performer,
+                            thumbnail=thumb_data,
                             read_timeout=60,
                             write_timeout=60,
                             connect_timeout=10,

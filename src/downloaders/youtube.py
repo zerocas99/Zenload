@@ -2,15 +2,13 @@ import re
 import os
 import logging
 import asyncio
-import tempfile
 import aiohttp
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 import yt_dlp
 from urllib.parse import urlparse, parse_qs
 from .base import BaseDownloader, DownloadError
-from ..utils.cobalt_service import cobalt
-from ..utils.youtube_api import youtube_api
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +86,6 @@ class YouTubeDownloader(BaseDownloader):
             'no_color': True,
             'no_warnings': True,
             'quiet': True,
-            'progress_hooks': [self._progress_hook],
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': '*/*',
@@ -96,10 +93,12 @@ class YouTubeDownloader(BaseDownloader):
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],
+                    'player_client': ['android', 'web'],  # android first to bypass 403
                     'player_skip': ['webpage', 'configs'],
                 }
-            }
+            },
+            'socket_timeout': 30,
+            'retries': 3,
         }
         if self.cookie_file.exists():
             opts['cookiefile'] = str(self.cookie_file)
@@ -198,19 +197,21 @@ class YouTubeDownloader(BaseDownloader):
             
             # For YouTube Music - download as audio with metadata
             if is_music:
-                return await self._download_music(url, download_dir)
+                metadata, audio_path, thumbnail_url = await self._download_music(url, download_dir)
+                # Store thumbnail URL in metadata for download_manager
+                if thumbnail_url:
+                    metadata = f"THUMB:{thumbnail_url}|{metadata}"
+                return metadata, audio_path
             
             # For audio format
             if format_id == 'audio':
                 return await self._download_audio(processed_url, download_dir)
             
-            # === Try yt-dlp directly for video (most reliable for long videos) ===
+            # === Download video with yt-dlp ===
             self.update_progress('status_downloading', 10)
             
             ydl_opts = self._get_ydl_opts(format_id)
-            ydl_opts.update({
-                'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
-            })
+            ydl_opts['outtmpl'] = str(download_dir / '%(id)s.%(ext)s')
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = await asyncio.to_thread(
@@ -287,21 +288,27 @@ class YouTubeDownloader(BaseDownloader):
             logger.error(f"[YouTube] Audio download failed: {e}")
             raise DownloadError(f"Ошибка загрузки аудио: {str(e)}")
 
-    async def _download_music(self, url: str, download_dir: Path) -> Tuple[str, Path]:
-        """Download YouTube Music as audio (no ffmpeg needed)"""
+    async def _download_music(self, url: str, download_dir: Path) -> Tuple[str, Path, Optional[str]]:
+        """Download YouTube Music as audio. Returns (metadata, file_path, thumbnail_url)"""
         try:
             self.update_progress('status_downloading', 10)
             processed_url = self.preprocess_url(url)
             
-            # Get info first
-            ydl_opts = {
+            # Get info first with android client to bypass 403
+            info_opts = {
                 'quiet': True,
                 'no_warnings': True,
+                'skip_download': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web'],
+                    }
+                },
             }
             if self.cookie_file.exists():
-                ydl_opts['cookiefile'] = str(self.cookie_file)
+                info_opts['cookiefile'] = str(self.cookie_file)
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(info_opts) as ydl:
                 info = await asyncio.to_thread(ydl.extract_info, processed_url, download=False)
             
             if not info:
@@ -312,15 +319,21 @@ class YouTubeDownloader(BaseDownloader):
             duration = info.get('duration', 0)
             view_count = info.get('view_count', 0)
             video_id = info.get('id', 'audio')
+            thumbnail_url = info.get('thumbnail')
             
             self.update_progress('status_downloading', 30)
             
-            # Download as audio (m4a - no ffmpeg needed)
+            # Download as audio with android client to bypass 403
             audio_opts = {
                 'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web'],
+                    }
+                },
             }
             if self.cookie_file.exists():
                 audio_opts['cookiefile'] = str(self.cookie_file)
@@ -361,7 +374,7 @@ class YouTubeDownloader(BaseDownloader):
                     plays = str(view_count)
                 
                 metadata = f"{title} | By: {artist} | Length: {length} | Plays: {plays} | <a href=\"{url}\">Ссылка</a>"
-                return metadata, audio_path
+                return metadata, audio_path, thumbnail_url
             
             raise DownloadError("Не удалось найти скачанный файл")
             
@@ -386,24 +399,5 @@ class YouTubeDownloader(BaseDownloader):
         channel_url = info.get('uploader_url', url)
 
         return f"YouTube | {views} | {likes}\nby <a href=\"{channel_url}\">{channel}</a>"
-
-    def _progress_hook(self, d: Dict[str, Any]):
-        """Progress hook for yt-dlp"""
-        if d['status'] == 'downloading':
-            # Get current event loop if available
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running() and not loop.is_closed():
-                    total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-                    downloaded = d.get('downloaded_bytes', 0)
-                    if total > 0:
-                        # Scale progress between 20-90% to leave room for pre/post processing
-                        progress = int((downloaded / total) * 70) + 20
-                        asyncio.create_task(
-                            self.update_progress('status_downloading', progress)
-                        )
-            except Exception as e:
-                if not "Event loop is closed" in str(e):
-                    logger.error(f"Error in progress hook: {e}")
 
 
