@@ -1,5 +1,8 @@
 import logging
 import re
+import asyncio
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Tuple, Dict, List
 
@@ -11,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class SoundcloudDownloader(BaseDownloader):
-    """Downloader powered by soundcloud-v2 library."""
+    """Downloader powered by soundcloud-v2 library with cover art embedding."""
 
     _url_pattern = re.compile(r"(soundcloud\.com|sndcdn\.com)", re.IGNORECASE)
 
@@ -57,43 +60,91 @@ class SoundcloudDownloader(BaseDownloader):
         file_path = DOWNLOADS_DIR / safe_name
         return track_meta, file_path, stream_url
 
-    def _format_metadata(self, track_meta: Dict) -> str:
-        parts = []
-        title = track_meta.get("title")
-        if title:
-            parts.append(title)
+    def _get_hq_artwork_url(self, artwork_url: str) -> str:
+        """Get high quality artwork URL (500x500)"""
+        if not artwork_url:
+            return None
+        # SoundCloud artwork URLs have size in them like -large, -t500x500, etc.
+        # Replace with t500x500 for high quality
+        return artwork_url.replace('-large', '-t500x500').replace('-small', '-t500x500')
 
-        user_info = track_meta.get("user") or {}
-        artist = user_info.get("username") or user_info.get("full_name")
-        if artist:
-            parts.append(f"By: {artist}")
+    async def _download_artwork(self, artwork_url: str) -> Path:
+        """Download artwork to temp file"""
+        if not artwork_url:
+            return None
+        
+        try:
+            session = await self.service._get_session()
+            hq_url = self._get_hq_artwork_url(artwork_url)
+            
+            async with session.get(hq_url, timeout=10) as resp:
+                if resp.status == 200:
+                    # Create temp file for artwork
+                    temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+                    temp_file.write(await resp.read())
+                    temp_file.close()
+                    return Path(temp_file.name)
+        except Exception as e:
+            logger.debug(f"Failed to download artwork: {e}")
+        return None
 
-        duration_ms = track_meta.get("duration") or track_meta.get("full_duration")
-        if duration_ms:
-            minutes = int(duration_ms) // 60000
-            seconds = int(duration_ms) % 60000 // 1000
-            parts.append(f"Length: {minutes}:{seconds:02d}")
-
-        play_count = track_meta.get("playback_count")
-        if play_count:
-            if play_count >= 1_000_000:
-                parts.append(f"Plays: {play_count/1_000_000:.1f}M")
-            elif play_count >= 1_000:
-                parts.append(f"Plays: {play_count/1_000:.1f}K")
+    async def _embed_metadata(self, audio_path: Path, track_meta: Dict, artwork_path: Path = None) -> bool:
+        """Embed metadata and cover art into MP3 file using ffmpeg"""
+        try:
+            title = track_meta.get("title") or "SoundCloud Track"
+            user_info = track_meta.get("user") or {}
+            artist = user_info.get("username") or user_info.get("full_name") or ""
+            
+            # Create output path
+            output_path = audio_path.with_suffix('.tmp.mp3')
+            
+            # Build ffmpeg command
+            cmd = ['ffmpeg', '-y', '-i', str(audio_path)]
+            
+            # Add artwork if available
+            if artwork_path and artwork_path.exists():
+                cmd.extend(['-i', str(artwork_path)])
+                cmd.extend(['-map', '0:a', '-map', '1:0'])
+                cmd.extend(['-c:v', 'mjpeg'])
+                cmd.extend(['-disposition:v', 'attached_pic'])
+            
+            # Add metadata
+            cmd.extend(['-c:a', 'copy'])
+            cmd.extend(['-metadata', f'title={title}'])
+            cmd.extend(['-metadata', f'artist={artist}'])
+            cmd.extend(['-metadata', 'album=SoundCloud'])
+            cmd.extend(['-id3v2_version', '3'])
+            cmd.append(str(output_path))
+            
+            # Run ffmpeg
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await process.wait()
+            
+            if process.returncode == 0 and output_path.exists():
+                # Replace original with new file
+                output_path.replace(audio_path)
+                logger.info(f"[SoundCloud] Embedded metadata: {title} - {artist}")
+                return True
             else:
-                parts.append(f"Plays: {play_count}")
-
-        permalink = track_meta.get("permalink_url")
-        if permalink:
-            parts.append(permalink)
-
-        return " | ".join(parts)
+                # Clean up failed output
+                if output_path.exists():
+                    output_path.unlink()
+                    
+        except Exception as e:
+            logger.debug(f"Failed to embed metadata: {e}")
+        
+        return False
 
     async def download(self, url: str, format_id: str = None) -> Tuple[str, Path]:
         try:
             self.update_progress("status_downloading", 5)
             track_meta, file_path, stream_url = await self._get_track_info(url)
 
+            # Download audio
             downloaded = 0
             total_size = 0
 
@@ -108,12 +159,33 @@ class SoundcloudDownloader(BaseDownloader):
                         f.write(chunk)
                         downloaded += len(chunk)
                         if total_size:
-                            progress = min(100, max(10, int(downloaded / total_size * 90)))
+                            progress = min(80, max(10, int(downloaded / total_size * 70)))
                             self.update_progress("status_downloading", progress)
+
+            self.update_progress("status_downloading", 85)
+            
+            # Download artwork and embed metadata
+            artwork_url = track_meta.get("artwork_url")
+            artwork_path = None
+            
+            try:
+                if artwork_url:
+                    artwork_path = await self._download_artwork(artwork_url)
+                
+                # Embed metadata and cover art
+                await self._embed_metadata(file_path, track_meta, artwork_path)
+                
+            finally:
+                # Clean up artwork temp file
+                if artwork_path and artwork_path.exists():
+                    try:
+                        artwork_path.unlink()
+                    except:
+                        pass
 
             self.update_progress("status_downloading", 100)
 
-            metadata = self._format_metadata(track_meta)
+            metadata = ""  # No metadata for audio, dev credit added in download_manager
             return metadata, file_path
         except Exception as e:
             logger.error(f"Error downloading from SoundCloud: {e}", exc_info=True)

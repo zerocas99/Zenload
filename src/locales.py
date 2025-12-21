@@ -46,8 +46,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         ),
         'settings_menu': (
             "⚙️ Настройки\n\n"
-            "🌐 Язык: {language}\n"
-            "📊 Качество: {quality}"
+            "🌐 Язык: {language}"
         ),
         'processing': "⏳ Обработка...",
         'select_quality': "📊 Выбери качество:",
@@ -159,8 +158,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         ),
         'settings_menu': (
             "⚙️ Settings\n\n"
-            "🌐 Language: {language}\n"
-            "📊 Quality: {quality}"
+            "🌐 Language: {language}"
         ),
         'processing': "⏳ Processing...",
         'select_quality': "📊 Select quality:",

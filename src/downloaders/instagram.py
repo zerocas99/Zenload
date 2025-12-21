@@ -30,7 +30,7 @@ class InstagramDownloader(BaseDownloader):
             'quiet': True,
             'no_warnings': True,
         })
-        self._metadata_template = "Instagram\n{url}"
+        self._metadata_template = ""  # No metadata, dev credit added in download_manager
 
     def _extract_shortcode(self, url: str) -> Optional[str]:
         """Extract shortcode from Instagram URL"""
@@ -70,7 +70,7 @@ class InstagramDownloader(BaseDownloader):
             )
             
             if result.success and result.url:
-                metadata = self._metadata_template.format(url=url)
+                metadata = ""  # No metadata, dev credit added in download_manager
                 is_audio = result.url.endswith(('.mp3', '.m4a', '.wav'))
                 is_photo = result.url.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
                 logger.info(f"[Instagram] Got direct URL from Cobalt (photo={is_photo})")
@@ -131,7 +131,7 @@ class InstagramDownloader(BaseDownloader):
                 
                 if file_path and file_path.exists():
                     logger.info("[Instagram] Story downloaded via stories service")
-                    metadata = self._metadata_template.format(url=url)
+                    metadata = ""  # No metadata, dev credit added in download_manager
                     return metadata, file_path
             except Exception as e:
                 logger.warning(f"[Instagram] Stories service failed: {e}")
@@ -152,7 +152,7 @@ class InstagramDownloader(BaseDownloader):
             
             if file_path and file_path.exists():
                 cobalt_success = True
-                metadata = self._metadata_template.format(url=url)
+                metadata = ""  # No metadata, dev credit added in download_manager
                 return metadata, file_path
                 
         except asyncio.TimeoutError:
@@ -174,7 +174,7 @@ class InstagramDownloader(BaseDownloader):
                 
                 if file_path and file_path.exists():
                     logger.info("[Instagram] JS fallback used successfully")
-                    metadata = self._metadata_template.format(url=url)
+                    metadata = ""  # No metadata, dev credit added in download_manager
                     return metadata, file_path
                     
             except Exception as e:
@@ -191,7 +191,7 @@ class InstagramDownloader(BaseDownloader):
         )
         
         if file_path and file_path.exists():
-            metadata = self._metadata_template.format(url=url)
+            metadata = ""  # No metadata, dev credit added in download_manager
             return metadata, file_path
         
         # === 4. Fallback to yt-dlp (skip for stories - requires auth) ===
@@ -228,7 +228,7 @@ class InstagramDownloader(BaseDownloader):
             if not file_path.exists():
                 raise DownloadError("File downloaded but not found")
 
-            metadata = self._metadata_template.format(url=url)
+            metadata = ""  # No metadata, dev credit added in download_manager
             return metadata, file_path
             
         except Exception as e:

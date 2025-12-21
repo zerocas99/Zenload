@@ -36,9 +36,13 @@ class DownloadWorker:
         self._last_update_time = 0
         self._update_interval = 0.3  # Faster status updates
 
-    def get_message(self, user_id: int, key: str, **kwargs) -> str:
-        """Get localized message"""
-        settings = self.settings_manager.get_settings(user_id)
+    def get_message(self, user_id: int, key: str, chat_id: int = None, **kwargs) -> str:
+        """Get localized message - use group settings for groups, user settings for private"""
+        # If chat_id provided and it's a group, use group settings
+        if chat_id and chat_id < 0:  # Negative chat_id = group
+            settings = self.settings_manager.get_settings(chat_id)
+        else:
+            settings = self.settings_manager.get_settings(user_id)
         language = settings.language
         return self.localization.get(language, key, **kwargs)
 
@@ -105,10 +109,9 @@ class DownloadWorker:
         """Try to send media directly via URL (fast method). Returns True if successful."""
         try:
             if is_audio:
-                await update.effective_message.reply_audio(
+                # Audio without caption - send without reply
+                await update.effective_chat.send_audio(
                     audio=direct_url,
-                    caption=caption,
-                    parse_mode='HTML',
                     read_timeout=20,
                     write_timeout=20,
                     connect_timeout=5,
@@ -141,12 +144,11 @@ class DownloadWorker:
             return False
 
     async def _send_audio_auto(self, update: Update, audio_url: str, user_id: int):
-        """Automatically send audio after video (for TikTok music)"""
+        """Automatically send audio after video (for TikTok music) - no caption, no reply"""
         try:
-            # Try sending audio directly via URL
-            await update.effective_message.reply_audio(
+            # Try sending audio directly via URL - no caption, no reply
+            await update.effective_chat.send_audio(
                 audio=audio_url,
-                caption="🎵",
                 read_timeout=30,
                 write_timeout=30,
                 connect_timeout=10,
@@ -155,19 +157,18 @@ class DownloadWorker:
             logger.info("Auto audio send successful")
         except Exception as e:
             logger.debug(f"Auto audio send failed: {e}")
-            # Try downloading and sending
+            # Try downloading, converting if needed, and sending
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(audio_url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 200:
                             audio_data = await resp.read()
-                            if len(audio_data) > 1000:  # Verify it's not empty
+                            if len(audio_data) > 1000:
                                 from io import BytesIO
                                 audio_file = BytesIO(audio_data)
                                 audio_file.name = "audio.mp3"
-                                await update.effective_message.reply_audio(
-                                    audio=audio_file,
-                                    caption="🎵"
+                                await update.effective_chat.send_audio(
+                                    audio=audio_file
                                 )
                                 logger.info("Auto audio send via download successful")
             except Exception as e2:
@@ -260,26 +261,30 @@ class DownloadWorker:
                         is_photo = False
                         all_images = None
                     
-                    # Add dev credit to metadata for direct URL sends
+                    # Set caption for direct URL sends
+                    # Audio: no caption, Video/Photo: dev credit only
                     if direct_url:
-                        settings = self.settings_manager.get_settings(user_id)
-                        lang = settings.language
-                        if lang == 'ru':
-                            dev_credit = "\n\n📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
+                        if is_audio:
+                            caption = None  # No caption for audio
                         else:
-                            dev_credit = "\n\n📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
-                        
-                        if metadata:
-                            metadata = metadata + dev_credit
-                        else:
-                            metadata = dev_credit.strip()
+                            chat_id = update.effective_chat.id
+                            # Use group settings for groups, user settings for private
+                            if chat_id < 0:  # Group
+                                settings = self.settings_manager.get_settings(chat_id)
+                            else:
+                                settings = self.settings_manager.get_settings(user_id)
+                            lang = settings.language
+                            if lang == 'ru':
+                                caption = "📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
+                            else:
+                                caption = "📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
                     
                     if direct_url:
                         logger.info(f"Got direct URL, trying fast send... (photo={is_photo}, images={len(all_images) if all_images else 0})")
                         
                         # If multiple images (TikTok slideshow), send as media group
                         if is_photo and all_images and len(all_images) > 1:
-                            if await self._send_media_group(update, all_images, metadata):
+                            if await self._send_media_group(update, all_images, caption):
                                 logger.info("Media group send successful!")
                                 
                                 # Send audio after slideshow if available
@@ -292,7 +297,7 @@ class DownloadWorker:
                                     except:
                                         pass
                                 return
-                        elif await self._try_direct_url_send(update, direct_url, is_audio, metadata, is_photo):
+                        elif await self._try_direct_url_send(update, direct_url, is_audio, caption, is_photo):
                             logger.info("Fast direct URL send successful!")
                             
                             # Auto-send audio if available (TikTok music) - but NOT for photos
@@ -314,35 +319,39 @@ class DownloadWorker:
             metadata, file_path = result
             logger.info(f"Download completed. File path: {file_path}")
             
-            # Add dev credit to metadata
-            settings = self.settings_manager.get_settings(user_id)
-            lang = settings.language
-            if lang == 'ru':
-                dev_credit = "\n\n📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
-            else:
-                dev_credit = "\n\n📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
+            # Determine file type by extension
+            file_ext = file_path.suffix.lower()
+            is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']
+            is_photo_file = file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
             
-            if metadata:
-                metadata = metadata + dev_credit
+            # For audio files - no caption (just the audio)
+            # For video/photo - add dev credit (use group language for groups)
+            if is_audio_file:
+                caption = None  # No caption for audio
             else:
-                metadata = dev_credit.strip()
+                chat_id = update.effective_chat.id
+                # Use group settings for groups, user settings for private
+                if chat_id < 0:  # Group
+                    settings = self.settings_manager.get_settings(chat_id)
+                else:
+                    settings = self.settings_manager.get_settings(user_id)
+                lang = settings.language
+                if lang == 'ru':
+                    dev_credit = "📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
+                else:
+                    dev_credit = "📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
+                caption = dev_credit
             
             # Sending phase (only update status if we have status_message)
             if status_message:
                 await self.update_status(status_message, user_id, 'status_sending', 0)
             logger.info("Sending file to Telegram...")
             
-            # Determine file type by extension
-            file_ext = file_path.suffix.lower()
-            is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']
-            is_photo_file = file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
-            
             with open(file_path, 'rb') as file:
                 if is_audio_file:
-                    await update.effective_message.reply_audio(
+                    # Send audio without caption and without reply
+                    await update.effective_chat.send_audio(
                         audio=file,
-                        caption=metadata,
-                        parse_mode='HTML',
                         read_timeout=30,
                         write_timeout=30,
                         connect_timeout=10,
@@ -351,7 +360,7 @@ class DownloadWorker:
                 elif is_photo_file:
                     await update.effective_message.reply_photo(
                         photo=file,
-                        caption=metadata,
+                        caption=caption,
                         parse_mode='HTML',
                         read_timeout=30,
                         write_timeout=30,
@@ -361,7 +370,7 @@ class DownloadWorker:
                 else:
                     await update.effective_message.reply_video(
                         video=file,
-                        caption=metadata,
+                        caption=caption,
                         parse_mode='HTML',
                         supports_streaming=True,
                         read_timeout=30,

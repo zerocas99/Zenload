@@ -72,7 +72,7 @@ class TikTokDownloader(BaseDownloader):
             )
             
             if result.success and result.url:
-                metadata = f"TikTok\n<a href=\"{url}\">Ссылка</a>"
+                metadata = ""  # No metadata, dev credit added in download_manager
                 is_audio = result.url.endswith(('.mp3', '.m4a', '.wav'))
                 logger.info(f"[TikTok] Got direct URL from Cobalt")
                 return result.url, metadata, is_audio, None, False, None
@@ -154,7 +154,7 @@ class TikTokDownloader(BaseDownloader):
         )
         
         if file_path and file_path.exists():
-            metadata = f"TikTok\n<a href=\"{url}\">Ссылка</a>"
+            metadata = ""  # No metadata, dev credit added in download_manager
             logger.info("[TikTok] Downloaded via Cobalt")
             return metadata, file_path
         
@@ -184,17 +184,7 @@ class TikTokDownloader(BaseDownloader):
             # Find downloaded file
             for file in download_dir.glob(f"{temp_filename}.*"):
                 if file.is_file():
-                    def format_number(num):
-                        if not num: return "0"
-                        if num >= 1000000: return f"{num/1000000:.1f}M"
-                        if num >= 1000: return f"{num/1000:.1f}K"
-                        return str(num)
-                    
-                    likes = format_number(info.get('like_count', 0))
-                    username = info.get('uploader', '').replace('https://www.tiktok.com/@', '')
-                    views = format_number(info.get('view_count', 0))
-                    
-                    metadata = f"TikTok | {views} | {likes}\nby <a href=\"{url}\">{username}</a>"
+                    metadata = ""  # No metadata, dev credit added in download_manager
                     return metadata, file
             
             raise DownloadError("Downloaded file not found")

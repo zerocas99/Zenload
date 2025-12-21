@@ -23,7 +23,7 @@ class KeyboardBuilder:
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     def build_settings_keyboard(self, user_id: int, chat_id: Optional[int] = None, is_admin: bool = False) -> InlineKeyboardMarkup:
-        """Build settings menu keyboard based on context"""
+        """Build settings menu keyboard based on context - only language setting"""
         # For groups, add context to callback data
         context = f":{chat_id}" if chat_id and chat_id < 0 else ""
         
@@ -32,10 +32,6 @@ class KeyboardBuilder:
                 InlineKeyboardButton(
                     self.get_message(user_id, 'btn_language', chat_id, is_admin),
                     callback_data=f"settings:language{context}"
-                ),
-                InlineKeyboardButton(
-                    self.get_message(user_id, 'btn_quality', chat_id, is_admin),
-                    callback_data=f"settings:quality{context}"
                 )
             ]
         ]

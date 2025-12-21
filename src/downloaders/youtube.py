@@ -21,12 +21,16 @@ class YouTubeDownloader(BaseDownloader):
         """Return platform identifier"""
         return 'youtube'
 
+    def _is_music_url(self, url: str) -> bool:
+        """Check if URL is YouTube Music"""
+        return 'music.youtube.com' in url.lower()
+
     def can_handle(self, url: str) -> bool:
-        """Check if URL is from YouTube"""
+        """Check if URL is from YouTube or YouTube Music"""
         parsed = urlparse(url)
         return bool(
             parsed.netloc and any(domain in parsed.netloc.lower() 
-            for domain in ['youtube.com', 'www.youtube.com', 'youtu.be'])
+            for domain in ['youtube.com', 'www.youtube.com', 'youtu.be', 'music.youtube.com'])
         )
 
     def preprocess_url(self, url: str) -> str:
@@ -37,6 +41,10 @@ class YouTubeDownloader(BaseDownloader):
         if 'youtu.be' in parsed.netloc:
             video_id = parsed.path.lstrip('/')
             return f'https://www.youtube.com/watch?v={video_id}'
+
+        # Handle music.youtube.com URLs - keep as is for music detection
+        if 'music.youtube.com' in parsed.netloc:
+            return url
 
         # Handle youtube.com URLs
         if 'youtube.com' in parsed.netloc:
@@ -136,16 +144,21 @@ class YouTubeDownloader(BaseDownloader):
                 raise DownloadError(f"Ошибка при получении форматов: {str(e)}")
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download video from URL - Cobalt first, then alternative APIs, then yt-dlp"""
+        """Download video/audio from URL - Cobalt first, then alternative APIs, then yt-dlp"""
         try:
             self.update_progress('status_downloading', 0)
             processed_url = self.preprocess_url(url)
-            logger.info(f"[YouTube] Downloading from: {processed_url}")
+            is_music = self._is_music_url(url)
+            logger.info(f"[YouTube] Downloading from: {processed_url} (music={is_music})")
 
             # Create download directory if not exists
             download_dir = Path(__file__).parent.parent.parent / "downloads"
             download_dir.mkdir(exist_ok=True)
             download_dir = download_dir.resolve()
+            
+            # For YouTube Music - download as audio with metadata
+            if is_music:
+                return await self._download_music(processed_url, download_dir)
             
             # === 1. Try Cobalt ===
             self.update_progress('status_downloading', 5)
@@ -157,13 +170,7 @@ class YouTubeDownloader(BaseDownloader):
             
             if file_path and file_path.exists():
                 logger.info("[YouTube] Downloaded via Cobalt")
-                # Get metadata via yt-dlp (quick, no download)
-                try:
-                    with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-                        info = await asyncio.to_thread(ydl.extract_info, processed_url, download=False)
-                        return self._prepare_metadata(info, processed_url), file_path
-                except:
-                    return f"YouTube\n<a href=\"{processed_url}\">Ссылка</a>", file_path
+                return "", file_path  # No metadata, dev credit added in download_manager
             
             # === 2. Try Alternative APIs ===
             logger.info("[YouTube] Cobalt failed, trying alternative APIs")
@@ -178,7 +185,7 @@ class YouTubeDownloader(BaseDownloader):
             
             if file_path and file_path.exists():
                 logger.info("[YouTube] Downloaded via alternative API")
-                return f"YouTube\n{title}" if title else f"YouTube\n<a href=\"{processed_url}\">Ссылка</a>", file_path
+                return "", file_path  # No metadata, dev credit added in download_manager
             
             # === 3. Fallback to yt-dlp ===
             logger.info("[YouTube] Alternative APIs failed, trying yt-dlp")
@@ -200,7 +207,7 @@ class YouTubeDownloader(BaseDownloader):
                     file_path = Path(filename).resolve()
                     if file_path.exists():
                         logger.info("[YouTube] Download completed successfully")
-                        return self._prepare_metadata(info, processed_url), file_path
+                        return "", file_path  # No metadata, dev credit added in download_manager
 
             raise DownloadError("Не удалось загрузить видео")
 
@@ -213,6 +220,84 @@ class YouTubeDownloader(BaseDownloader):
             else:
                 logger.error(f"[YouTube] Download failed: {error_msg}")
                 raise DownloadError(f"Ошибка загрузки: {error_msg}")
+
+    async def _download_music(self, url: str, download_dir: Path) -> Tuple[str, Path]:
+        """Download YouTube Music as audio with cover art and metadata"""
+        try:
+            self.update_progress('status_downloading', 10)
+            
+            # Get info first
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+            }
+            if self.cookie_file.exists():
+                ydl_opts['cookiefile'] = str(self.cookie_file)
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = await asyncio.to_thread(ydl.extract_info, url, download=False)
+            
+            if not info:
+                raise DownloadError("Не удалось получить информацию о треке")
+            
+            title = info.get('title', 'Unknown')
+            artist = info.get('artist') or info.get('uploader', 'Unknown')
+            thumbnail_url = info.get('thumbnail')
+            
+            self.update_progress('status_downloading', 30)
+            
+            # Download as audio
+            audio_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '320',
+                }],
+                'quiet': True,
+                'no_warnings': True,
+            }
+            if self.cookie_file.exists():
+                audio_opts['cookiefile'] = str(self.cookie_file)
+            
+            # Add thumbnail embedding if available
+            if thumbnail_url:
+                audio_opts['postprocessors'].append({
+                    'key': 'FFmpegMetadata',
+                    'add_metadata': True,
+                })
+                audio_opts['postprocessors'].append({
+                    'key': 'EmbedThumbnail',
+                })
+                audio_opts['writethumbnail'] = True
+            
+            with yt_dlp.YoutubeDL(audio_opts) as ydl:
+                await asyncio.to_thread(ydl.extract_info, url, download=True)
+            
+            self.update_progress('status_downloading', 90)
+            
+            # Find the downloaded mp3 file
+            video_id = info.get('id', 'audio')
+            mp3_path = download_dir / f"{video_id}.mp3"
+            
+            if not mp3_path.exists():
+                # Try to find any mp3 file with the video id
+                for f in download_dir.glob(f"{video_id}*"):
+                    if f.suffix.lower() == '.mp3':
+                        mp3_path = f
+                        break
+            
+            if mp3_path.exists():
+                logger.info(f"[YouTube Music] Downloaded: {title} - {artist}")
+                self.update_progress('status_downloading', 100)
+                return "", mp3_path  # No metadata caption, audio sent without caption
+            
+            raise DownloadError("Не удалось найти скачанный файл")
+            
+        except Exception as e:
+            logger.error(f"[YouTube Music] Download failed: {e}")
+            raise DownloadError(f"Ошибка загрузки музыки: {str(e)}")
 
     def _prepare_metadata(self, info: Dict, url: str) -> str:
         """Prepare metadata string from info"""

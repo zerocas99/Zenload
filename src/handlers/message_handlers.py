@@ -97,7 +97,10 @@ class MessageHandlers:
         return False
 
     def _is_youtube_url(self, url: str) -> bool:
-        """Check if URL is from YouTube"""
+        """Check if URL is from YouTube (but NOT YouTube Music)"""
+        # YouTube Music should be treated as audio, not video with quality selection
+        if 'music.youtube.com' in url.lower():
+            return False
         youtube_patterns = [
             'youtube.com', 'youtu.be', 'youtube.com/shorts',
             'youtube.com/watch', 'youtube.com/v/', 'youtube.com/embed/'

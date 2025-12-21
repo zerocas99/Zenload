@@ -73,7 +73,7 @@ class PinterestDownloader(BaseDownloader):
         )
         
         if file_path and file_path.exists():
-            metadata = f"Pinterest\n<a href=\"{url}\">Ссылка</a>"
+            metadata = ""  # No metadata, dev credit added in download_manager
             return metadata, file_path
         
         # === 2. Try Alternative Pinterest APIs ===
@@ -87,7 +87,7 @@ class PinterestDownloader(BaseDownloader):
         )
         
         if file_path and file_path.exists():
-            metadata = f"Pinterest\n<a href=\"{url}\">Ссылка</a>"
+            metadata = ""  # No metadata, dev credit added in download_manager
             return metadata, file_path
         
         # === 3. Fallback to yt-dlp ===
@@ -112,8 +112,7 @@ class PinterestDownloader(BaseDownloader):
                     filename = ydl.prepare_filename(info)
                     file_path = Path(filename).resolve()
                     if file_path.exists():
-                        title = info.get('title', '')
-                        metadata = f"Pinterest\n{title}" if title else "Pinterest"
+                        metadata = ""  # No metadata, dev credit added in download_manager
                         return metadata, file_path
             
             raise DownloadError("Failed to download")

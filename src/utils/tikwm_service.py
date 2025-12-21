@@ -82,21 +82,7 @@ class TikWmService:
         if not info:
             return None, None, False, None, False, None
         
-        # Format metadata
-        def format_number(num):
-            if not num:
-                return "0"
-            if num >= 1000000:
-                return f"{num/1000000:.1f}M"
-            if num >= 1000:
-                return f"{num/1000:.1f}K"
-            return str(num)
-        
-        plays = format_number(info.get('play_count', 0))
-        likes = format_number(info.get('like_count', 0))
-        author = info.get('author', '') or info.get('author_id', '')
-        
-        metadata = f"TikTok | {plays} ▶️ | {likes} ❤️\nby @{author}"
+        metadata = ""  # No metadata, dev credit added in download_manager
         
         # Check if it's a photo slideshow
         if info.get('is_images') and info.get('images'):
@@ -182,21 +168,7 @@ class TikWmService:
                     
                     # Verify file
                     if file_path.exists() and file_path.stat().st_size > 1000:
-                        # Format metadata
-                        def format_number(num):
-                            if not num:
-                                return "0"
-                            if num >= 1000000:
-                                return f"{num/1000000:.1f}M"
-                            if num >= 1000:
-                                return f"{num/1000:.1f}K"
-                            return str(num)
-                        
-                        plays = format_number(info.get('play_count', 0))
-                        likes = format_number(info.get('like_count', 0))
-                        author = info.get('author', '') or info.get('author_id', '')
-                        
-                        metadata = f"TikTok | {plays} ▶️ | {likes} ❤️\nby @{author}"
+                        metadata = ""  # No metadata, dev credit added in download_manager
                         
                         logger.info(f"[TikWm] Download successful: {file_path}")
                         return filename, file_path, metadata
