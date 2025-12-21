@@ -74,13 +74,13 @@ class YouTubeDownloader(BaseDownloader):
     def _get_ydl_opts(self, format_id: Optional[str] = None) -> Dict:
         """Get yt-dlp options"""
         if format_id == 'audio':
-            format_str = 'bestaudio/best'
+            format_str = 'bestaudio[ext=m4a]/bestaudio/best'
         elif format_id and format_id != 'best':
-            # For specific quality like 720, 1080
-            format_str = f'bestvideo[height<={format_id}]+bestaudio/best[height<={format_id}]/best'
+            # For specific quality - prefer single file formats that don't need merging
+            format_str = f'best[height<={format_id}][ext=mp4]/best[height<={format_id}]/best[ext=mp4]/best'
         else:
-            # Best quality - allow merging for best result
-            format_str = 'bestvideo+bestaudio/best'
+            # Best quality - prefer single file formats
+            format_str = 'best[ext=mp4]/best'
         
         opts = {
             'format': format_str,
@@ -88,7 +88,6 @@ class YouTubeDownloader(BaseDownloader):
             'no_color': True,
             'no_warnings': True,
             'quiet': True,
-            'merge_output_format': 'mp4',  # Merge to mp4
             'progress_hooks': [self._progress_hook],
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -253,20 +252,13 @@ class YouTubeDownloader(BaseDownloader):
                 raise DownloadError(f"Ошибка загрузки: {error_msg}")
 
     async def _download_audio(self, url: str, download_dir: Path) -> Tuple[str, Path]:
-        """Download as audio only (MP3)"""
+        """Download as audio only (M4A - no ffmpeg needed)"""
         try:
             self.update_progress('status_downloading', 10)
             
             ydl_opts = {
-                'format': 'bestaudio/best',
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
-                'postprocessors': [
-                    {
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '320',
-                    },
-                ],
                 'quiet': True,
                 'no_warnings': True,
             }
@@ -278,16 +270,16 @@ class YouTubeDownloader(BaseDownloader):
             
             if info:
                 video_id = info.get('id', 'audio')
-                mp3_path = download_dir / f"{video_id}.mp3"
+                # Find audio file (m4a or other)
+                for ext in ['.m4a', '.mp3', '.webm', '.opus']:
+                    audio_path = download_dir / f"{video_id}{ext}"
+                    if audio_path.exists():
+                        return "", audio_path
                 
-                if not mp3_path.exists():
-                    for f in download_dir.glob(f"{video_id}*"):
-                        if f.suffix.lower() == '.mp3':
-                            mp3_path = f
-                            break
-                
-                if mp3_path.exists():
-                    return "", mp3_path
+                # Try to find any file with the video id
+                for f in download_dir.glob(f"{video_id}.*"):
+                    if f.suffix.lower() in ['.m4a', '.mp3', '.webm', '.opus', '.ogg']:
+                        return "", f
             
             raise DownloadError("Не удалось скачать аудио")
             
@@ -296,7 +288,7 @@ class YouTubeDownloader(BaseDownloader):
             raise DownloadError(f"Ошибка загрузки аудио: {str(e)}")
 
     async def _download_music(self, url: str, download_dir: Path) -> Tuple[str, Path]:
-        """Download YouTube Music as audio with cover art and metadata"""
+        """Download YouTube Music as audio (no ffmpeg needed)"""
         try:
             self.update_progress('status_downloading', 10)
             processed_url = self.preprocess_url(url)
@@ -319,31 +311,14 @@ class YouTubeDownloader(BaseDownloader):
             artist = info.get('artist') or info.get('channel') or info.get('uploader', 'Unknown')
             duration = info.get('duration', 0)
             view_count = info.get('view_count', 0)
-            thumbnail_url = info.get('thumbnail')
             video_id = info.get('id', 'audio')
             
             self.update_progress('status_downloading', 30)
             
-            # Download as audio with thumbnail embedding
+            # Download as audio (m4a - no ffmpeg needed)
             audio_opts = {
-                'format': 'bestaudio/best',
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
-                'postprocessors': [
-                    {
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '320',
-                    },
-                    {
-                        'key': 'FFmpegMetadata',
-                        'add_metadata': True,
-                    },
-                    {
-                        'key': 'EmbedThumbnail',
-                    },
-                ],
-                'writethumbnail': True,
-                'embedthumbnail': True,
                 'quiet': True,
                 'no_warnings': True,
             }
@@ -355,34 +330,21 @@ class YouTubeDownloader(BaseDownloader):
             
             self.update_progress('status_downloading', 90)
             
-            # Find the downloaded mp3 file
-            mp3_path = download_dir / f"{video_id}.mp3"
+            # Find the downloaded audio file
+            audio_path = None
+            for ext in ['.m4a', '.mp3', '.webm', '.opus']:
+                path = download_dir / f"{video_id}{ext}"
+                if path.exists():
+                    audio_path = path
+                    break
             
-            if not mp3_path.exists():
-                # Try to find any mp3 file with the video id
-                for f in download_dir.glob(f"{video_id}*"):
-                    if f.suffix.lower() == '.mp3':
-                        mp3_path = f
+            if not audio_path:
+                for f in download_dir.glob(f"{video_id}.*"):
+                    if f.suffix.lower() in ['.m4a', '.mp3', '.webm', '.opus', '.ogg']:
+                        audio_path = f
                         break
             
-            # Clean up thumbnail files
-            for f in download_dir.glob(f"{video_id}*.jpg"):
-                try:
-                    f.unlink()
-                except:
-                    pass
-            for f in download_dir.glob(f"{video_id}*.webp"):
-                try:
-                    f.unlink()
-                except:
-                    pass
-            for f in download_dir.glob(f"{video_id}*.png"):
-                try:
-                    f.unlink()
-                except:
-                    pass
-            
-            if mp3_path.exists():
+            if audio_path and audio_path.exists():
                 logger.info(f"[YouTube Music] Downloaded: {title} - {artist}")
                 self.update_progress('status_downloading', 100)
                 
@@ -399,7 +361,7 @@ class YouTubeDownloader(BaseDownloader):
                     plays = str(view_count)
                 
                 metadata = f"{title} | By: {artist} | Length: {length} | Plays: {plays} | <a href=\"{url}\">Ссылка</a>"
-                return metadata, mp3_path
+                return metadata, audio_path
             
             raise DownloadError("Не удалось найти скачанный файл")
             

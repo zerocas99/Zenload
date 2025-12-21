@@ -321,7 +321,7 @@ class DownloadWorker:
             
             # Determine file type by extension
             file_ext = file_path.suffix.lower()
-            is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']
+            is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac', '.webm', '.opus']
             is_photo_file = file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
             
             # Check if this is SoundCloud or YouTube Music (has metadata with track info)
@@ -425,7 +425,7 @@ class DownloadWorker:
             if self.activity_logger:
                 success = file_path is not None  # If we have a file_path, download was successful
                 file_ext = Path(file_path).suffix.lower() if file_path else ''
-                if file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']:
+                if file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac', '.webm', '.opus']:
                     file_type = 'audio'
                 elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
                     file_type = 'photo'
