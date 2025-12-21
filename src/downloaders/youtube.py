@@ -72,7 +72,8 @@ class YouTubeDownloader(BaseDownloader):
     def _get_ydl_opts(self, format_id: Optional[str] = None) -> Dict:
         """Get yt-dlp options"""
         if format_id == 'audio':
-            format_str = 'bestaudio[ext=m4a]/bestaudio/best'
+            # For audio - use any available audio format
+            format_str = 'bestaudio/best'
         elif format_id and format_id != 'best':
             # For specific quality - prefer single file formats that don't need merging
             format_str = f'best[height<={format_id}][ext=mp4]/best[height<={format_id}]/best[ext=mp4]/best'
@@ -93,9 +94,9 @@ class YouTubeDownloader(BaseDownloader):
             },
             'extractor_args': {
                 'youtube': {
-                    # Use tv client - doesn't require PO Token
-                    'player_client': ['tv', 'web'],
-                    'player_skip': ['webpage', 'configs'],
+                    # Use web_embedded - doesn't require PO Token, only embeddable videos
+                    # Fallback to tv_embedded which also doesn't require PO Token
+                    'player_client': ['web_embedded', 'tv_embedded'],
                 }
             },
             'socket_timeout': 30,
@@ -254,15 +255,20 @@ class YouTubeDownloader(BaseDownloader):
                 raise DownloadError(f"Ошибка загрузки: {error_msg}")
 
     async def _download_audio(self, url: str, download_dir: Path) -> Tuple[str, Path]:
-        """Download as audio only (M4A - no ffmpeg needed)"""
+        """Download as audio only"""
         try:
             self.update_progress('status_downloading', 10)
             
             ydl_opts = {
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                'format': 'bestaudio/best',
                 'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['web_embedded', 'tv_embedded'],
+                    }
+                },
             }
             if self.cookie_file.exists():
                 ydl_opts['cookiefile'] = str(self.cookie_file)
@@ -272,15 +278,15 @@ class YouTubeDownloader(BaseDownloader):
             
             if info:
                 video_id = info.get('id', 'audio')
-                # Find audio file (m4a or other)
-                for ext in ['.m4a', '.mp3', '.webm', '.opus']:
+                # Find audio file (any format)
+                for ext in ['.m4a', '.mp3', '.webm', '.opus', '.mp4']:
                     audio_path = download_dir / f"{video_id}{ext}"
                     if audio_path.exists():
                         return "", audio_path
                 
                 # Try to find any file with the video id
                 for f in download_dir.glob(f"{video_id}.*"):
-                    if f.suffix.lower() in ['.m4a', '.mp3', '.webm', '.opus', '.ogg']:
+                    if f.suffix.lower() in ['.m4a', '.mp3', '.webm', '.opus', '.ogg', '.mp4']:
                         return "", f
             
             raise DownloadError("Не удалось скачать аудио")
@@ -295,14 +301,14 @@ class YouTubeDownloader(BaseDownloader):
             self.update_progress('status_downloading', 10)
             processed_url = self.preprocess_url(url)
             
-            # Get info first with tv client - doesn't require PO Token
+            # Get info first
             info_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'skip_download': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['tv', 'web'],
+                        'player_client': ['web_embedded', 'tv_embedded'],
                     }
                 },
             }
@@ -324,15 +330,15 @@ class YouTubeDownloader(BaseDownloader):
             
             self.update_progress('status_downloading', 30)
             
-            # Download as audio with tv client - doesn't require PO Token
+            # Download as audio - use any available audio format
             audio_opts = {
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                'format': 'bestaudio/best',
                 'outtmpl': str(download_dir / f'{video_id}.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['tv', 'web'],
+                        'player_client': ['web_embedded', 'tv_embedded'],
                     }
                 },
             }
@@ -346,7 +352,7 @@ class YouTubeDownloader(BaseDownloader):
             
             # Find the downloaded audio file
             audio_path = None
-            for ext in ['.m4a', '.mp3', '.webm', '.opus']:
+            for ext in ['.m4a', '.mp3', '.webm', '.opus', '.mp4']:
                 path = download_dir / f"{video_id}{ext}"
                 if path.exists():
                     audio_path = path
@@ -354,7 +360,7 @@ class YouTubeDownloader(BaseDownloader):
             
             if not audio_path:
                 for f in download_dir.glob(f"{video_id}.*"):
-                    if f.suffix.lower() in ['.m4a', '.mp3', '.webm', '.opus', '.ogg']:
+                    if f.suffix.lower() in ['.m4a', '.mp3', '.webm', '.opus', '.ogg', '.mp4']:
                         audio_path = f
                         break
             
