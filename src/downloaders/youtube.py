@@ -163,17 +163,25 @@ class YouTubeDownloader(BaseDownloader):
                     result = await self._youtube_js.get_video_url(processed_url, quality)
                     
                     if result.success and result.url:
-                        logger.info("[YouTube] JS fallback success, downloading...")
+                        logger.info(f"[YouTube] JS fallback got URL, downloading from: {result.url[:100]}...")
                         self.update_progress('status_downloading', 30)
                         
                         import requests
                         response = await asyncio.to_thread(
                             requests.get, result.url,
-                            headers={'User-Agent': 'Mozilla/5.0'},
-                            timeout=300
+                            headers={
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                                'Accept': '*/*',
+                                'Accept-Encoding': 'identity',
+                                'Connection': 'keep-alive',
+                            },
+                            timeout=300,
+                            stream=False
                         )
                         
-                        if response.status_code == 200:
+                        logger.info(f"[YouTube] JS fallback response: status={response.status_code}, size={len(response.content)}")
+                        
+                        if response.status_code == 200 and len(response.content) > 10000:
                             video_id = processed_url.split('v=')[-1].split('&')[0] if 'v=' in processed_url else 'video'
                             ext = result.container or 'mp4'
                             filename = f"{video_id}.{ext}"
@@ -183,8 +191,12 @@ class YouTubeDownloader(BaseDownloader):
                                 f.write(response.content)
                             
                             self.update_progress('status_downloading', 100)
-                            logger.info(f"[YouTube] JS fallback download completed: {file_path}")
+                            logger.info(f"[YouTube] JS fallback download completed: {file_path} ({len(response.content)} bytes)")
                             return "", file_path
+                        else:
+                            logger.warning(f"[YouTube] JS fallback download failed: status={response.status_code}, size={len(response.content)}")
+                    else:
+                        logger.warning(f"[YouTube] JS fallback no URL: {result.error}")
                 except Exception as e:
                     logger.warning(f"[YouTube] JS fallback failed: {e}, trying Piped...")
             
