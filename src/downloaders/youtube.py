@@ -167,8 +167,10 @@ class YouTubeDownloader(BaseDownloader):
             if format_id == 'audio':
                 return await self._download_audio(processed_url, download_dir)
             
-            # Try Cobalt first (most reliable for YouTube)
-            if self._cobalt:
+            # Skip Cobalt for YouTube - tunnel doesn't work on Railway
+            # Cobalt returns tunnel URLs that require internal network access
+            # Use yt-dlp with cookies instead
+            if False and self._cobalt:  # DISABLED for YouTube
                 try:
                     logger.info("[YouTube] Trying Cobalt API...")
                     quality = format_id if format_id and format_id != 'best' else "1080"
@@ -294,8 +296,21 @@ class YouTubeDownloader(BaseDownloader):
             else:
                 raise DownloadError(f"Ошибка загрузки: {error_msg}")
 
+    def _load_proxies(self) -> List[str]:
+        """Load proxies from proxies.json"""
+        try:
+            proxies_file = Path(__file__).parent.parent.parent / "proxies.json"
+            if proxies_file.exists():
+                import json
+                with open(proxies_file) as f:
+                    proxies_data = json.load(f)
+                return [f"http://{p['ip_address']}:{p['port']}" for p in proxies_data]
+        except Exception as e:
+            logger.warning(f"[YouTube] Failed to load proxies: {e}")
+        return []
+
     async def _download_with_ytdlp(self, url: str, download_dir: Path, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download using yt-dlp with cookies"""
+        """Download using yt-dlp with cookies and proxy rotation"""
         self.update_progress('status_downloading', 10)
         
         # Simple format - let yt-dlp choose
@@ -331,49 +346,69 @@ class YouTubeDownloader(BaseDownloader):
             logger.info(f"[YouTube] Using cookies: {self.cookie_file}")
         else:
             logger.info("[YouTube] No cookies available")
+        
+        # Load proxies for rotation
+        proxies = self._load_proxies()
+        
+        # Try without proxy first, then with proxies
+        attempts = [None] + proxies[:5]  # None = no proxy, then first 5 proxies
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await asyncio.to_thread(ydl.extract_info, url, download=True)
-                if info:
-                    filename = ydl.prepare_filename(info)
-                    file_path = Path(filename).resolve()
-                    
-                    # Handle merged files (may have different extension)
-                    if not file_path.exists():
-                        mp4_path = file_path.with_suffix('.mp4')
-                        if mp4_path.exists():
-                            file_path = mp4_path
-                        else:
-                            video_id = info.get('id', '')
-                            for f in download_dir.glob(f"{video_id}.*"):
-                                if f.suffix.lower() in ['.mp4', '.mkv', '.webm']:
-                                    file_path = f
-                                    break
-                    
-                    if file_path.exists():
-                        logger.info(f"[YouTube] yt-dlp download completed: {file_path}")
-                        return "", file_path
-                        
-        except yt_dlp.utils.DownloadError as e:
-            error_str = str(e)
-            logger.error(f"[YouTube] yt-dlp error: {error_str}")
-            
-            # Specific error handling
-            if "Private video" in error_str:
-                raise DownloadError("Это приватное видео")
-            elif "Video unavailable" in error_str:
-                raise DownloadError("Видео недоступно")
-            elif "Sign in" in error_str or "age" in error_str.lower():
-                raise DownloadError("Видео требует авторизации (18+ или Premium)")
-            else:
-                raise DownloadError(f"Ошибка загрузки: {error_str[:100]}")
+        last_error = None
+        for i, proxy in enumerate(attempts):
+            try:
+                opts = ydl_opts.copy()
+                if proxy:
+                    opts['proxy'] = proxy
+                    logger.info(f"[YouTube] Trying with proxy {i}: {proxy}")
+                else:
+                    logger.info("[YouTube] Trying without proxy...")
                 
-        except Exception as e:
-            error_str = str(e)
-            logger.error(f"[YouTube] yt-dlp error: {error_str}")
-            raise DownloadError(f"Ошибка загрузки: {error_str[:100]}")
-
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = await asyncio.to_thread(ydl.extract_info, url, download=True)
+                    if info:
+                        filename = ydl.prepare_filename(info)
+                        file_path = Path(filename).resolve()
+                        
+                        # Handle merged files (may have different extension)
+                        if not file_path.exists():
+                            mp4_path = file_path.with_suffix('.mp4')
+                            if mp4_path.exists():
+                                file_path = mp4_path
+                            else:
+                                video_id = info.get('id', '')
+                                for f in download_dir.glob(f"{video_id}.*"):
+                                    if f.suffix.lower() in ['.mp4', '.mkv', '.webm']:
+                                        file_path = f
+                                        break
+                        
+                        if file_path.exists():
+                            logger.info(f"[YouTube] yt-dlp download completed: {file_path}")
+                            return "", file_path
+                            
+            except yt_dlp.utils.DownloadError as e:
+                error_str = str(e)
+                logger.warning(f"[YouTube] yt-dlp error (attempt {i+1}): {error_str[:100]}")
+                last_error = error_str
+                
+                # Don't retry for permanent errors
+                if "Private video" in error_str:
+                    raise DownloadError("Это приватное видео")
+                elif "Video unavailable" in error_str:
+                    raise DownloadError("Видео недоступно")
+                # Continue to next proxy for "Sign in" errors
+                continue
+                    
+            except Exception as e:
+                error_str = str(e)
+                logger.warning(f"[YouTube] Error (attempt {i+1}): {error_str[:100]}")
+                last_error = error_str
+                continue
+        
+        # All attempts failed
+        if last_error:
+            if "Sign in" in last_error or "age" in last_error.lower():
+                raise DownloadError("Видео требует авторизации (18+ или Premium)")
+            raise DownloadError(f"Ошибка загрузки: {last_error[:100]}")
         raise DownloadError("Не удалось загрузить видео")
 
     async def _download_audio(self, url: str, download_dir: Path) -> Tuple[str, Path]:
