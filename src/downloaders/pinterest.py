@@ -22,7 +22,24 @@ class PinterestDownloader(BaseDownloader):
         return 'pinterest'
 
     def can_handle(self, url: str) -> bool:
-        return any(x in url.lower() for x in ['pinterest.com', 'pin.it'])
+        return any(x in url.lower() for x in ['pinterest.com', 'pin.it', 'pinterest.ru', 'pinterest.co.uk', 'pinterest.de', 'pinterest.fr'])
+
+    async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool, Optional[list]]:
+        """Get direct URL for fast sending"""
+        try:
+            result = await asyncio.wait_for(
+                cobalt.request(url),
+                timeout=10
+            )
+            
+            if result.success and result.url:
+                is_audio = result.url.endswith(('.mp3', '.m4a', '.wav'))
+                logger.info("[Pinterest] Got direct URL from Cobalt")
+                return result.url, "", is_audio, None, False, None
+        except Exception as e:
+            logger.debug(f"[Pinterest] get_direct_url failed: {e}")
+        
+        return None, None, False, None, False, None
 
     async def get_formats(self, url: str) -> List[Dict]:
         """Get available formats"""

@@ -1,14 +1,13 @@
 """
 Universal Cobalt-based downloader for multiple platforms.
-Supports: VK, OK, Rutube, Facebook, Twitch, Bilibili, Dailymotion, 
-Vimeo, Tumblr, Streamable, Loom, Bluesky, Reddit, Snapchat, Xiaohongshu
+Supports all platforms from Cobalt API with fast direct URL sending.
 """
 
 import os
 import logging
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 import aiohttp
 from .base import BaseDownloader, DownloadError
@@ -16,43 +15,42 @@ from ..utils.cobalt_service import cobalt
 
 logger = logging.getLogger(__name__)
 
-
-# Platform configurations
+# All platforms supported by Cobalt with ALL possible domains
 PLATFORMS = {
     'vk': {
-        'domains': ['vk.com', 'vkvideo.ru'],
+        'domains': ['vk.com', 'vkvideo.ru', 'm.vk.com', 'vk.ru'],
         'name': 'VK Video',
     },
     'ok': {
-        'domains': ['ok.ru', 'odnoklassniki.ru'],
+        'domains': ['ok.ru', 'odnoklassniki.ru', 'm.ok.ru'],
         'name': 'Одноклассники',
     },
     'rutube': {
-        'domains': ['rutube.ru'],
+        'domains': ['rutube.ru', 'm.rutube.ru'],
         'name': 'Rutube',
     },
     'facebook': {
-        'domains': ['facebook.com', 'fb.watch', 'fb.com'],
+        'domains': ['facebook.com', 'fb.watch', 'fb.com', 'm.facebook.com', 'www.facebook.com', 'web.facebook.com'],
         'name': 'Facebook',
     },
     'twitch': {
-        'domains': ['twitch.tv', 'clips.twitch.tv'],
+        'domains': ['twitch.tv', 'clips.twitch.tv', 'm.twitch.tv', 'www.twitch.tv'],
         'name': 'Twitch',
     },
     'bilibili': {
-        'domains': ['bilibili.com', 'b23.tv'],
+        'domains': ['bilibili.com', 'b23.tv', 'www.bilibili.com', 'm.bilibili.com', 'bilibili.tv'],
         'name': 'Bilibili',
     },
     'dailymotion': {
-        'domains': ['dailymotion.com', 'dai.ly'],
+        'domains': ['dailymotion.com', 'dai.ly', 'www.dailymotion.com'],
         'name': 'Dailymotion',
     },
     'vimeo': {
-        'domains': ['vimeo.com'],
+        'domains': ['vimeo.com', 'player.vimeo.com', 'www.vimeo.com'],
         'name': 'Vimeo',
     },
     'tumblr': {
-        'domains': ['tumblr.com'],
+        'domains': ['tumblr.com', 'www.tumblr.com'],
         'name': 'Tumblr',
     },
     'streamable': {
@@ -60,7 +58,7 @@ PLATFORMS = {
         'name': 'Streamable',
     },
     'loom': {
-        'domains': ['loom.com'],
+        'domains': ['loom.com', 'www.loom.com'],
         'name': 'Loom',
     },
     'bluesky': {
@@ -68,26 +66,30 @@ PLATFORMS = {
         'name': 'Bluesky',
     },
     'reddit': {
-        'domains': ['reddit.com', 'redd.it'],
+        'domains': ['reddit.com', 'redd.it', 'www.reddit.com', 'old.reddit.com', 'new.reddit.com', 'v.redd.it'],
         'name': 'Reddit',
     },
     'snapchat': {
-        'domains': ['snapchat.com', 'story.snapchat.com'],
+        'domains': ['snapchat.com', 'story.snapchat.com', 'www.snapchat.com', 't.snapchat.com'],
         'name': 'Snapchat',
     },
     'xiaohongshu': {
-        'domains': ['xiaohongshu.com', 'xhslink.com'],
+        'domains': ['xiaohongshu.com', 'xhslink.com', 'www.xiaohongshu.com'],
         'name': 'Xiaohongshu',
     },
     'newgrounds': {
-        'domains': ['newgrounds.com'],
+        'domains': ['newgrounds.com', 'www.newgrounds.com'],
         'name': 'Newgrounds',
+    },
+    'twitter': {
+        'domains': ['twitter.com', 'x.com', 't.co', 'mobile.twitter.com', 'mobile.x.com'],
+        'name': 'Twitter/X',
     },
 }
 
 
 class CobaltPlatformDownloader(BaseDownloader):
-    """Universal downloader for platforms supported by Cobalt"""
+    """Universal downloader for platforms supported by Cobalt with fast send"""
     
     def __init__(self):
         super().__init__()
@@ -99,11 +101,14 @@ class CobaltPlatformDownloader(BaseDownloader):
     def _detect_platform(self, url: str) -> Optional[str]:
         """Detect which platform the URL belongs to"""
         parsed = urlparse(url)
-        domain = parsed.netloc.lower().replace('www.', '')
+        domain = parsed.netloc.lower().replace('www.', '').replace('m.', '')
         
         for platform_id, config in PLATFORMS.items():
-            if any(d in domain for d in config['domains']):
-                return platform_id
+            for d in config['domains']:
+                # Check if domain matches or is subdomain
+                clean_d = d.replace('www.', '').replace('m.', '')
+                if clean_d in domain or domain.endswith(clean_d):
+                    return platform_id
         return None
     
     def can_handle(self, url: str) -> bool:
@@ -114,48 +119,51 @@ class CobaltPlatformDownloader(BaseDownloader):
             return True
         return False
     
-    def get_platform_name(self, url: str) -> str:
+    def get_platform_name(self, url: str = None) -> str:
         """Get human-readable platform name"""
-        platform = self._detect_platform(url)
+        platform = self._detected_platform or (self._detect_platform(url) if url else None)
         if platform and platform in PLATFORMS:
             return PLATFORMS[platform]['name']
         return 'Video'
 
     async def get_direct_url(self, url: str) -> Tuple[Optional[str], Optional[str], bool, Optional[str], bool, Optional[list]]:
-        """Try to get direct URL for fast sending"""
+        """
+        Get direct URL for fast sending (without downloading to server).
+        Returns: (direct_url, metadata, is_audio, audio_url, is_gallery, all_items)
+        """
         try:
+            # Fast timeout for direct URL
             result = await asyncio.wait_for(
                 cobalt.request(url),
-                timeout=15
+                timeout=10
             )
             
             if result.success:
                 if result.picker and len(result.picker) > 0:
-                    # Multiple items (e.g., Reddit gallery)
+                    # Multiple items (gallery)
                     direct_url = result.picker[0].get('url')
                     all_items = [item.get('url') for item in result.picker if item.get('url')]
-                    return direct_url, "", False, None, len(all_items) > 1, all_items
+                    is_gallery = len(all_items) > 1
+                    logger.info(f"[Cobalt] Got picker with {len(all_items)} items")
+                    return direct_url, "", False, None, is_gallery, all_items
                 elif result.url:
-                    is_audio = result.url.endswith(('.mp3', '.m4a', '.wav', '.opus'))
+                    is_audio = any(result.url.endswith(ext) for ext in ['.mp3', '.m4a', '.wav', '.opus', '.ogg'])
+                    logger.info(f"[Cobalt] Got direct URL (audio={is_audio})")
                     return result.url, "", is_audio, None, False, None
+            else:
+                logger.debug(f"[Cobalt] No direct URL: {result.error}")
                     
+        except asyncio.TimeoutError:
+            logger.debug("[Cobalt] Direct URL timeout")
         except Exception as e:
-            logger.debug(f"[Cobalt] get_direct_url failed: {e}")
+            logger.debug(f"[Cobalt] get_direct_url error: {e}")
         
         return None, None, False, None, False, None
 
     async def get_formats(self, url: str) -> List[Dict]:
         """Get available formats"""
-        self.update_progress('status_getting_info', 0)
-        platform = self._detect_platform(url)
-        platform_name = PLATFORMS.get(platform, {}).get('name', 'Video')
-        
-        # Cobalt handles quality automatically
-        self.update_progress('status_getting_info', 100)
+        platform_name = self.get_platform_name(url)
         return [
-            {'id': '1080', 'quality': '1080p', 'ext': 'mp4'},
-            {'id': '720', 'quality': '720p', 'ext': 'mp4'},
-            {'id': '480', 'quality': '480p', 'ext': 'mp4'},
             {'id': 'best', 'quality': f'Best ({platform_name})', 'ext': 'mp4'},
         ]
 
@@ -170,16 +178,11 @@ class CobaltPlatformDownloader(BaseDownloader):
         
         self.update_progress('status_downloading', 10)
         
-        # Determine quality
-        quality = "1080"
-        if format_id and format_id != 'best':
-            quality = format_id.replace('p', '')
-        
         # Try Cobalt with timeout
         try:
             result = await asyncio.wait_for(
-                cobalt.request(url, video_quality=quality),
-                timeout=30
+                cobalt.request(url),
+                timeout=20
             )
             
             if result.success:
@@ -192,7 +195,7 @@ class CobaltPlatformDownloader(BaseDownloader):
                 if download_url:
                     self.update_progress('status_downloading', 30)
                     
-                    # Download file
+                    # Fast download with short timeout
                     async with aiohttp.ClientSession() as session:
                         async with session.get(
                             download_url,
@@ -200,10 +203,9 @@ class CobaltPlatformDownloader(BaseDownloader):
                                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                                 'Accept': '*/*',
                             },
-                            timeout=aiohttp.ClientTimeout(total=120, connect=15)
+                            timeout=aiohttp.ClientTimeout(total=60, connect=10)
                         ) as response:
                             if response.status == 200:
-                                # Generate filename
                                 filename = result.filename or f"{platform}_{os.urandom(4).hex()}.mp4"
                                 file_path = download_dir / filename
                                 
@@ -231,7 +233,7 @@ class CobaltPlatformDownloader(BaseDownloader):
             raise DownloadError(f"Ошибка загрузки с {platform_name}: {error_msg}")
         
         except asyncio.TimeoutError:
-            logger.error(f"[{platform_name}] Timeout - Cobalt took too long")
+            logger.error(f"[{platform_name}] Timeout")
             raise DownloadError(f"Таймаут загрузки с {platform_name}")
         except DownloadError:
             raise
