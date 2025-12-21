@@ -81,25 +81,40 @@ class KeyboardBuilder:
         return InlineKeyboardMarkup(keyboard)
 
     def build_format_selection_keyboard(self, user_id: int, formats: list, chat_id: Optional[int] = None, is_admin: bool = False) -> InlineKeyboardMarkup:
-        """Build format selection keyboard for downloads"""
+        """Build format selection keyboard for YouTube downloads - compact design"""
         context = f":{chat_id}" if chat_id and chat_id < 0 else ""
         
+        # Create row with video quality buttons (720p, 1080p side by side)
+        video_buttons = []
+        
+        # Find 720p and 1080p formats
+        has_720 = any(f['quality'] == '720p' for f in formats)
+        has_1080 = any(f['quality'] == '1080p' for f in formats)
+        
+        if has_720:
+            video_buttons.append(InlineKeyboardButton(
+                "🎬 720p",
+                callback_data=f"quality:720{context}"
+            ))
+        
+        if has_1080:
+            # Add hourglass emoji if 1080p (takes longer)
+            video_buttons.append(InlineKeyboardButton(
+                "🎬 1080p (⏳)",
+                callback_data=f"quality:1080{context}"
+            ))
+        
         keyboard = []
-        for fmt in formats:
-            keyboard.append([InlineKeyboardButton(
-                self.get_message(
-                    user_id,
-                    'quality_format',
-                    chat_id,
-                    is_admin,
-                    quality=fmt['quality'],
-                    ext=fmt['ext']
-                ),
-                callback_data=f"quality:{fmt['id']}{context}"
-            )])
+        
+        # Add video buttons row
+        if video_buttons:
+            keyboard.append(video_buttons)
+        
+        # Add audio button on separate row
         keyboard.append([InlineKeyboardButton(
-            self.get_message(user_id, 'best_quality', chat_id, is_admin),
-            callback_data=f"quality:best{context}"
+            "🎵 Audio",
+            callback_data=f"quality:audio{context}"
         )])
+        
         return InlineKeyboardMarkup(keyboard)
 

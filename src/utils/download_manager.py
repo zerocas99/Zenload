@@ -324,6 +324,9 @@ class DownloadWorker:
             is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']
             is_photo_file = file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
             
+            # Check if this is SoundCloud or YouTube Music (has metadata with track info)
+            is_music_platform = metadata and ('| By:' in metadata or '| Length:' in metadata)
+            
             chat_id = update.effective_chat.id
             # Use group settings for groups, user settings for private
             if chat_id < 0:  # Group
@@ -354,16 +357,28 @@ class DownloadWorker:
             
             with open(file_path, 'rb') as file:
                 if is_audio_file:
-                    # Send audio without reply
-                    await update.effective_chat.send_audio(
-                        audio=file,
-                        caption=caption,
-                        parse_mode='HTML',
-                        read_timeout=30,
-                        write_timeout=30,
-                        connect_timeout=10,
-                        pool_timeout=10
-                    )
+                    # SoundCloud and YouTube Music - send with reply
+                    # TikTok sounds - send without reply
+                    if is_music_platform:
+                        await update.effective_message.reply_audio(
+                            audio=file,
+                            caption=caption,
+                            parse_mode='HTML',
+                            read_timeout=60,
+                            write_timeout=60,
+                            connect_timeout=10,
+                            pool_timeout=10
+                        )
+                    else:
+                        await update.effective_chat.send_audio(
+                            audio=file,
+                            caption=caption,
+                            parse_mode='HTML',
+                            read_timeout=30,
+                            write_timeout=30,
+                            connect_timeout=10,
+                            pool_timeout=10
+                        )
                 elif is_photo_file:
                     await update.effective_message.reply_photo(
                         photo=file,
@@ -380,8 +395,8 @@ class DownloadWorker:
                         caption=caption,
                         parse_mode='HTML',
                         supports_streaming=True,
-                        read_timeout=30,
-                        write_timeout=30,
+                        read_timeout=120,
+                        write_timeout=120,
                         connect_timeout=10,
                         pool_timeout=10
                     )

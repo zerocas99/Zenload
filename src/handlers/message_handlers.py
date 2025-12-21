@@ -129,23 +129,25 @@ class MessageHandlers:
         # Check if this is YouTube - only YouTube gets quality selection
         is_youtube = self._is_youtube_url(url)
         
-        # Create a placeholder message (will be deleted immediately or used for quality selection)
         status_message = None
-        if is_youtube:
-            try:
-                status_message = await update.message.reply_text("⏳")
-            except Exception:
-                try:
-                    status_message = await update.effective_chat.send_message("⏳")
-                except:
-                    pass
 
         try:
             # Only get formats for YouTube
             if is_youtube:
-                formats = await downloader.get_formats(url)
+                # Show loading message
+                try:
+                    status_message = await update.message.reply_text("⏳ Загрузка...")
+                except Exception:
+                    try:
+                        status_message = await update.effective_chat.send_message("⏳ Загрузка...")
+                    except:
+                        pass
                 
-                if formats:
+                # Get video info and formats
+                formats = await downloader.get_formats(url)
+                video_info = await downloader.get_video_info(url)
+                
+                if formats and video_info:
                     # Store URL in context for callback
                     if not context.user_data:
                         context.user_data.clear()
@@ -156,7 +158,7 @@ class MessageHandlers:
                     
                     # If default quality is set and not 'ask', start download
                     if settings.default_quality != 'ask':
-                        # Delete status message immediately - no need to show it
+                        # Delete status message
                         if status_message:
                             try:
                                 await status_message.delete()
@@ -170,31 +172,53 @@ class MessageHandlers:
                                 downloader, 
                                 url, 
                                 update, 
-                                None,  # No status message
+                                None,
                                 settings.default_quality
                             )
                         )
                         
-                        # Store task reference
                         task_key = f"{user_id}:{url}"
                         self._download_tasks[task_key] = download_task
-                        
-                        # Clean up task when done
                         download_task.add_done_callback(
                             lambda t: self._download_tasks.pop(task_key, None)
                         )
                         return
                     
-                    # Show quality selection keyboard for YouTube
+                    # Build caption with video info
+                    title = video_info.get('title', 'Unknown')
+                    caption = f"ℹ️ {title}"
+                    
+                    # Get thumbnail URL
+                    thumbnail_url = video_info.get('thumbnail')
+                    
+                    # Delete loading message
                     if status_message:
-                        await status_message.edit_text(
-                            self.get_message(user_id, 'select_quality'),
-                            reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
-                        )
+                        try:
+                            await status_message.delete()
+                        except:
+                            pass
+                        status_message = None
+                    
+                    # Send photo with quality selection buttons
+                    if thumbnail_url:
+                        try:
+                            await update.message.reply_photo(
+                                photo=thumbnail_url,
+                                caption=caption,
+                                reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
+                            )
+                            return
+                        except Exception as e:
+                            logger.debug(f"Failed to send thumbnail: {e}")
+                    
+                    # Fallback to text message if thumbnail fails
+                    await update.message.reply_text(
+                        caption,
+                        reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
+                    )
                     return
             
             # For non-YouTube platforms - download immediately with best quality
-            # Delete status message if exists
             if status_message:
                 try:
                     await status_message.delete()
@@ -208,16 +232,13 @@ class MessageHandlers:
                     downloader, 
                     url, 
                     update, 
-                    None,  # No status message
-                    'best'  # Always best quality for non-YouTube
+                    None,
+                    'best'
                 )
             )
             
-            # Store task reference
             task_key = f"{user_id}:{url}"
             self._download_tasks[task_key] = download_task
-            
-            # Clean up task when done
             download_task.add_done_callback(
                 lambda t: self._download_tasks.pop(task_key, None)
             )
