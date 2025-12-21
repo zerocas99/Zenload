@@ -139,6 +139,32 @@ class SoundcloudDownloader(BaseDownloader):
         
         return False
 
+    def _format_metadata(self, track_meta: Dict, url: str) -> str:
+        """Format metadata for audio caption"""
+        title = track_meta.get("title") or "Unknown"
+        
+        user_info = track_meta.get("user") or {}
+        artist = user_info.get("username") or user_info.get("full_name") or "Unknown"
+        
+        # Duration
+        duration_ms = track_meta.get("duration") or track_meta.get("full_duration") or 0
+        minutes = int(duration_ms) // 60000
+        seconds = int(duration_ms) % 60000 // 1000
+        length = f"{minutes}:{seconds:02d}"
+        
+        # Play count
+        play_count = track_meta.get("playback_count") or 0
+        if play_count >= 1_000_000:
+            plays = f"{play_count/1_000_000:.1f}M"
+        elif play_count >= 1_000:
+            plays = f"{play_count/1_000:.1f}K"
+        else:
+            plays = str(play_count)
+        
+        permalink = track_meta.get("permalink_url") or url
+        
+        return f"{title} | By: {artist} | Length: {length} | Plays: {plays} | <a href=\"{permalink}\">Ссылка</a>"
+
     async def download(self, url: str, format_id: str = None) -> Tuple[str, Path]:
         try:
             self.update_progress("status_downloading", 5)
@@ -185,7 +211,8 @@ class SoundcloudDownloader(BaseDownloader):
 
             self.update_progress("status_downloading", 100)
 
-            metadata = ""  # No metadata for audio, dev credit added in download_manager
+            # Return metadata for caption
+            metadata = self._format_metadata(track_meta, url)
             return metadata, file_path
         except Exception as e:
             logger.error(f"Error downloading from SoundCloud: {e}", exc_info=True)

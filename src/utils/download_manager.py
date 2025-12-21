@@ -324,22 +324,27 @@ class DownloadWorker:
             is_audio_file = file_ext in ['.mp3', '.m4a', '.wav', '.ogg', '.flac']
             is_photo_file = file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
             
-            # For audio files - no caption (just the audio)
-            # For video/photo - add dev credit (use group language for groups)
-            if is_audio_file:
-                caption = None  # No caption for audio
+            chat_id = update.effective_chat.id
+            # Use group settings for groups, user settings for private
+            if chat_id < 0:  # Group
+                settings = self.settings_manager.get_settings(chat_id)
             else:
-                chat_id = update.effective_chat.id
-                # Use group settings for groups, user settings for private
-                if chat_id < 0:  # Group
-                    settings = self.settings_manager.get_settings(chat_id)
+                settings = self.settings_manager.get_settings(user_id)
+            lang = settings.language
+            
+            if lang == 'ru':
+                dev_credit = "📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
+            else:
+                dev_credit = "📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
+            
+            # For audio files - show track info + dev credit if metadata provided
+            # For video/photo - just dev credit
+            if is_audio_file:
+                if metadata:
+                    caption = f"{metadata}\n\n{dev_credit}"
                 else:
-                    settings = self.settings_manager.get_settings(user_id)
-                lang = settings.language
-                if lang == 'ru':
-                    dev_credit = "📥 Скачано через @ZeroLoader_Bot\n👨‍💻 Разработчик: @zerob1ade"
-                else:
-                    dev_credit = "📥 Downloaded via @ZeroLoader_Bot\n👨‍💻 Dev: @zerob1ade"
+                    caption = None  # No caption for audio without metadata (like TikTok sounds)
+            else:
                 caption = dev_credit
             
             # Sending phase (only update status if we have status_message)
@@ -349,9 +354,11 @@ class DownloadWorker:
             
             with open(file_path, 'rb') as file:
                 if is_audio_file:
-                    # Send audio without caption and without reply
+                    # Send audio without reply
                     await update.effective_chat.send_audio(
                         audio=file,
+                        caption=caption,
+                        parse_mode='HTML',
                         read_timeout=30,
                         write_timeout=30,
                         connect_timeout=10,

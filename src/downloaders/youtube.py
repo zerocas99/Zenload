@@ -241,36 +241,37 @@ class YouTubeDownloader(BaseDownloader):
                 raise DownloadError("Не удалось получить информацию о треке")
             
             title = info.get('title', 'Unknown')
-            artist = info.get('artist') or info.get('uploader', 'Unknown')
+            artist = info.get('artist') or info.get('channel') or info.get('uploader', 'Unknown')
+            duration = info.get('duration', 0)
+            view_count = info.get('view_count', 0)
             thumbnail_url = info.get('thumbnail')
             
             self.update_progress('status_downloading', 30)
             
-            # Download as audio
+            # Download as audio with thumbnail
             audio_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': str(download_dir / '%(id)s.%(ext)s'),
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '320',
-                }],
+                'postprocessors': [
+                    {
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '320',
+                    },
+                    {
+                        'key': 'FFmpegMetadata',
+                        'add_metadata': True,
+                    },
+                    {
+                        'key': 'EmbedThumbnail',
+                    },
+                ],
+                'writethumbnail': True,
                 'quiet': True,
                 'no_warnings': True,
             }
             if self.cookie_file.exists():
                 audio_opts['cookiefile'] = str(self.cookie_file)
-            
-            # Add thumbnail embedding if available
-            if thumbnail_url:
-                audio_opts['postprocessors'].append({
-                    'key': 'FFmpegMetadata',
-                    'add_metadata': True,
-                })
-                audio_opts['postprocessors'].append({
-                    'key': 'EmbedThumbnail',
-                })
-                audio_opts['writethumbnail'] = True
             
             with yt_dlp.YoutubeDL(audio_opts) as ydl:
                 await asyncio.to_thread(ydl.extract_info, url, download=True)
@@ -291,7 +292,21 @@ class YouTubeDownloader(BaseDownloader):
             if mp3_path.exists():
                 logger.info(f"[YouTube Music] Downloaded: {title} - {artist}")
                 self.update_progress('status_downloading', 100)
-                return "", mp3_path  # No metadata caption, audio sent without caption
+                
+                # Format metadata for caption
+                minutes = duration // 60
+                seconds = duration % 60
+                length = f"{minutes}:{seconds:02d}"
+                
+                if view_count >= 1_000_000:
+                    plays = f"{view_count/1_000_000:.1f}M"
+                elif view_count >= 1_000:
+                    plays = f"{view_count/1_000:.1f}K"
+                else:
+                    plays = str(view_count)
+                
+                metadata = f"{title} | By: {artist} | Length: {length} | Plays: {plays} | <a href=\"{url}\">Ссылка</a>"
+                return metadata, mp3_path
             
             raise DownloadError("Не удалось найти скачанный файл")
             
