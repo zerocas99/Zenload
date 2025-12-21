@@ -49,21 +49,24 @@ class YouTubeDownloader(BaseDownloader):
         if cookies_content:
             try:
                 # Check if it looks like base64 (doesn't start with # which is Netscape format header)
-                is_base64 = not cookies_content.strip().startswith('#')
+                first_char = cookies_content.strip()[0] if cookies_content.strip() else ''
+                is_netscape = first_char == '#' or first_char == '.'
                 
-                if is_base64:
+                if not is_netscape:
+                    # Looks like base64 - Railway might have split it into multiple lines
+                    # Join all lines and decode
                     try:
-                        # Remove any whitespace/newlines that Railway might have added
-                        clean_b64 = cookies_content.replace('\n', '').replace('\r', '').replace(' ', '')
+                        # Remove ALL whitespace (spaces, newlines, tabs, etc.)
+                        clean_b64 = ''.join(cookies_content.split())
                         decoded = base64.b64decode(clean_b64).decode('utf-8')
                         cookies_content = decoded
-                        logger.info("[YouTube] Cookies decoded from base64")
+                        logger.info("[YouTube] Cookies decoded from base64 successfully")
                     except Exception as e:
-                        logger.warning(f"[YouTube] Base64 decode failed: {e}, trying as plain text")
-                        # Not valid base64, try as plain text with newline fix
+                        logger.warning(f"[YouTube] Base64 decode failed: {e}")
+                        # Maybe it's plain text with literal \n
                         cookies_content = cookies_content.replace('\\n', '\n')
                 else:
-                    # Already in Netscape format, just fix escaped newlines
+                    # Already in Netscape format, just fix escaped newlines if any
                     cookies_content = cookies_content.replace('\\n', '\n')
                 
                 cookies_dir = self.cookie_file.parent
@@ -74,7 +77,7 @@ class YouTubeDownloader(BaseDownloader):
                 
                 # Log first line to verify format
                 first_line = cookies_content.split('\n')[0] if cookies_content else ''
-                logger.info(f"[YouTube] Cookies file first line: {first_line[:50]}...")
+                logger.info(f"[YouTube] Cookies file first line: {first_line[:60]}...")
             except Exception as e:
                 logger.warning(f"[YouTube] Failed to write cookies: {e}")
 
