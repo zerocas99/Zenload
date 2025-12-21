@@ -255,7 +255,7 @@ class InstagramStoriesService:
                 if item_data['url_story_id'] == story_id:
                     logger.info(f"[Stories] Found story_id via main URL JWT at index {item_data['idx']}")
                     original_url = item_data['original_url']
-                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower())
+                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower() or '/o1/v/' in original_url)
                     return [{
                         'type': 'video' if is_video else 'photo',
                         'url': item_data['url'],
@@ -263,12 +263,12 @@ class InstagramStoriesService:
                         'matched': True
                     }]
             
-            # Priority 2: Match by story_id in original URL string
+            # Priority 2: Match by story_id in original URL string (ig_cache_key or direct)
             for item_data in all_items_data:
                 if item_data['original_url'] and story_id in item_data['original_url']:
                     logger.info(f"[Stories] Found story_id in original URL string at index {item_data['idx']}")
                     original_url = item_data['original_url']
-                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower())
+                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower() or '/o1/v/' in original_url)
                     return [{
                         'type': 'video' if is_video else 'photo',
                         'url': item_data['url'],
@@ -276,17 +276,35 @@ class InstagramStoriesService:
                         'matched': True
                     }]
             
-            # Priority 3: Match by thumbnail story ID - but use the SAME item's URL
-            # The API returns multiple quality variants, thumbnail ID identifies the story
+            # Priority 3: Match by thumbnail story ID
+            # BUT verify that the main URL doesn't contain a DIFFERENT story_id
+            other_story_ids = set()
+            for item_data in all_items_data:
+                if item_data['thumb_story_id'] and item_data['thumb_story_id'] != story_id:
+                    other_story_ids.add(item_data['thumb_story_id'])
+            
             for item_data in all_items_data:
                 if item_data['thumb_story_id'] == story_id:
                     logger.info(f"[Stories] Found story_id via thumbnail JWT at index {item_data['idx']}")
                     logger.info(f"[Stories] Using URL: {item_data['url'][:100]}...")
                     logger.info(f"[Stories] Original URL decoded: {item_data['original_url'][:100] if item_data['original_url'] else 'None'}...")
-                    # Use this item's URL directly - it should be the video for this story
+                    logger.info(f"[Stories] Thumb original: {item_data['thumb_original'][:100] if item_data['thumb_original'] else 'None'}...")
+                    
+                    # Check if original URL contains a DIFFERENT story's ID
+                    url_has_wrong_story = False
+                    if item_data['original_url']:
+                        for other_id in other_story_ids:
+                            if other_id in item_data['original_url']:
+                                url_has_wrong_story = True
+                                logger.warning(f"[Stories] Main URL at index {item_data['idx']} contains wrong story_id {other_id}, skipping")
+                                break
+                    
+                    if url_has_wrong_story:
+                        continue  # Try next item with same thumb_story_id
+                    
+                    # Use this item's URL
                     original_url = item_data['original_url'] or item_data['thumb_original']
-                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower())
-                    # Also check the URL itself for video indicators
+                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower() or '/o1/v/' in original_url)
                     if not is_video:
                         is_video = '/v/' in item_data['url'] or 'video' in item_data['url'].lower()
                     return [{
@@ -296,21 +314,20 @@ class InstagramStoriesService:
                         'matched': True
                     }]
             
-            # Priority 4: Direct string search in raw item
-            for idx, item in enumerate(data):
-                if isinstance(item, dict):
-                    item_str = str(item)
-                    if story_id in item_str:
-                        url = item.get('url', '')
-                        if url:
-                            logger.info(f"[Stories] Found story_id in item string at index {idx}")
-                            is_video = '.mp4' in url.lower() or 'video' in url.lower()
-                            return [{
-                                'type': 'video' if is_video else 'photo',
-                                'url': url,
-                                'index': idx,
-                                'matched': True
-                            }]
+            # Priority 4: If all items with matching thumb have wrong URL, 
+            # try to find URL that contains the story_id anywhere
+            logger.warning(f"[Stories] Thumbnail match failed, searching for story_id in any URL...")
+            for item_data in all_items_data:
+                if item_data['original_url'] and story_id in str(item_data):
+                    logger.info(f"[Stories] Found story_id in item data at index {item_data['idx']}")
+                    original_url = item_data['original_url']
+                    is_video = original_url and ('.mp4' in original_url.lower() or '/video/' in original_url.lower() or '/o1/v/' in original_url)
+                    return [{
+                        'type': 'video' if is_video else 'photo',
+                        'url': item_data['url'],
+                        'index': item_data['idx'],
+                        'matched': True
+                    }]
             
             logger.warning(f"[Stories] Could not find story_id {story_id} in {len(all_items_data)} items")
         
