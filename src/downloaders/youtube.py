@@ -313,13 +313,12 @@ class YouTubeDownloader(BaseDownloader):
         """Download using yt-dlp with cookies and proxy rotation"""
         self.update_progress('status_downloading', 10)
         
-        # Simple format - let yt-dlp choose
+        # Simple format - let yt-dlp choose the best available
         if format_id == 'audio':
             format_str = 'bestaudio/best'
-        elif format_id and format_id != 'best':
-            format_str = f'best[height<={format_id}]/best'
         else:
-            format_str = 'best'  # Let yt-dlp choose the best available
+            # Always use best available to avoid "format not available" errors
+            format_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
         
         ydl_opts = {
             'format': format_str,
@@ -329,6 +328,7 @@ class YouTubeDownloader(BaseDownloader):
             'noplaylist': True,
             'ignoreerrors': False,
             'no_color': True,
+            'merge_output_format': 'mp4',
             # Network settings
             'socket_timeout': 30,
             'retries': 3,

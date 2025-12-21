@@ -197,7 +197,7 @@ class CobaltPlatformDownloader(BaseDownloader):
                                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                                 'Accept': '*/*',
                             },
-                            timeout=aiohttp.ClientTimeout(total=300)
+                            timeout=aiohttp.ClientTimeout(total=120, connect=15)
                         ) as response:
                             if response.status == 200:
                                 # Generate filename
