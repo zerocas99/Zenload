@@ -16,10 +16,15 @@ class YouTubeDownloader(BaseDownloader):
         super().__init__()
         self.cookie_file = Path(__file__).parent.parent.parent / "cookies" / "youtube.txt"
         self._video_info_cache = {}
-        
+
+        # Allow toggling Cobalt usage for YouTube downloads (enabled by default
+        # when the service is available, so self-hosted instances can be used)
+        cobalt_flag = os.getenv("YOUTUBE_USE_COBALT")
+        self._use_cobalt = (cobalt_flag.lower() != "false") if cobalt_flag is not None else True
+
         # Create cookies from environment variable if available
         self._setup_cookies_from_env()
-        
+
         # Import Cobalt service
         try:
             from ..utils.cobalt_service import cobalt
@@ -170,7 +175,7 @@ class YouTubeDownloader(BaseDownloader):
             # Skip Cobalt for YouTube - tunnel doesn't work on Railway
             # Cobalt returns tunnel URLs that require internal network access
             # Use yt-dlp with cookies instead
-            if False and self._cobalt:  # DISABLED for YouTube
+            if self._use_cobalt and self._cobalt:
                 try:
                     logger.info("[YouTube] Trying Cobalt API...")
                     quality = format_id if format_id and format_id != 'best' else "1080"
