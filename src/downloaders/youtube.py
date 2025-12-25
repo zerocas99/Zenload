@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -7,14 +8,14 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
-from ..config import DOWNLOADS_DIR, YOUTUBE_MAX_UPLOAD_MB
+from ..config import DOWNLOADS_DIR, YOUTUBE_MAX_UPLOAD_MB, COOKIES_DIR
 from .base import BaseDownloader, DownloadError
 
 logger = logging.getLogger(__name__)
 
 
 class YouTubeDownloader(BaseDownloader):
-    """YouTube downloader using yt-dlp (same approach as bot/bot.py)."""
+    """YouTube downloader using yt-dlp with cookies support."""
 
     # Same format as working bot/bot.py
     VIDEO_FORMAT = "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]/best[ext=mp4]/best"
@@ -25,6 +26,13 @@ class YouTubeDownloader(BaseDownloader):
         self.download_dir = DOWNLOADS_DIR
         self.download_dir.mkdir(exist_ok=True)
         self.max_upload_mb = min(YOUTUBE_MAX_UPLOAD_MB, 2000)
+        
+        # Cookies file path
+        self.cookies_file = COOKIES_DIR / "youtube.txt"
+        if self.cookies_file.exists():
+            logger.info(f"[YouTube] Using cookies from {self.cookies_file}")
+        else:
+            logger.warning("[YouTube] No cookies file found, downloads may fail with 403")
 
     def platform_id(self) -> str:
         return "youtube"
