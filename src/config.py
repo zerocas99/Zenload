@@ -17,6 +17,12 @@ if TOKEN is None:
         "TELEGRAM_BOT_TOKEN environment variable is not set. Please set it in your .env file."
     )
 
+# YouTube download limits (capped to 2000 MB to prevent runaway files)
+YOUTUBE_MAX_UPLOAD_MB = min(
+    int(os.getenv("YOUTUBE_MAX_UPLOAD_MB", "2000")),
+    2000
+)
+
 # Platform specific configurations
 YTDLP_OPTIONS = {
     'instagram': {

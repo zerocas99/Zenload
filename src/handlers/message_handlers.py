@@ -98,9 +98,10 @@ class MessageHandlers:
 
     def _is_youtube_url(self, url: str) -> bool:
         """Check if URL is from YouTube (but NOT YouTube Music)"""
-        # Disable quality selection for YouTube - use Cobalt directly
-        # YouTube Music should be treated as audio, not video with quality selection
-        return False  # Temporarily disable YouTube quality selection - Cobalt handles it
+        if not url:
+            return False
+        url_lower = url.lower()
+        return any(domain in url_lower for domain in ['youtube.com', 'youtu.be', 'music.youtube.com'])
 
 
 
@@ -126,104 +127,62 @@ class MessageHandlers:
             await self._process_all_stories(url, update, downloader)
             return
 
-        # Check if this is YouTube - it gets quality selection
         is_youtube = self._is_youtube_url(url)
-        needs_quality_selection = is_youtube
-        
         status_message = None
 
         try:
-            # Only get formats for YouTube and VK
-            if needs_quality_selection:
-                # Show loading message
+            if is_youtube:
                 try:
-                    status_message = await update.message.reply_text("⏳ Загрузка...")
+                    status_message = await update.message.reply_text("Loading video info...")
                 except Exception:
                     try:
-                        status_message = await update.effective_chat.send_message("⏳ Загрузка...")
-                    except:
+                        status_message = await update.effective_chat.send_message("Loading video info...")
+                    except Exception:
                         pass
                 
-                # Get video info and formats
                 formats = await downloader.get_formats(url)
                 video_info = await downloader.get_video_info(url)
                 
-                if formats and video_info:
-                    # Store URL in context for callback
-                    if not context.user_data:
-                        context.user_data.clear()
-                    context.user_data['pending_url'] = url
+                # Store URL in context for callback
+                if not context.user_data:
+                    context.user_data.clear()
+                context.user_data['pending_url'] = url
 
-                    # Get user settings
-                    settings = self.settings_manager.get_settings(user_id)
-                    
-                    # If default quality is set and not 'ask', start download
-                    if settings.default_quality != 'ask':
-                        # Delete status message
-                        if status_message:
-                            try:
-                                await status_message.delete()
-                            except:
-                                pass
-                            status_message = None
-                        
-                        # Create download task without status message
-                        download_task = asyncio.create_task(
-                            self.download_manager.process_download(
-                                downloader, 
-                                url, 
-                                update, 
-                                None,
-                                settings.default_quality
-                            )
-                        )
-                        
-                        task_key = f"{user_id}:{url}"
-                        self._download_tasks[task_key] = download_task
-                        download_task.add_done_callback(
-                            lambda t: self._download_tasks.pop(task_key, None)
+                title = (video_info or {}).get('title', 'YouTube')
+                caption = f"Video: {title}"
+                thumbnail_url = (video_info or {}).get('thumbnail')
+                
+                if status_message:
+                    try:
+                        await status_message.delete()
+                    except Exception:
+                        pass
+                    status_message = None
+                
+                keyboard = self.keyboard_builder.build_format_selection_keyboard(user_id, formats or [])
+                
+                if thumbnail_url:
+                    try:
+                        await update.message.reply_photo(
+                            photo=thumbnail_url,
+                            caption=caption,
+                            reply_markup=keyboard
                         )
                         return
-                    
-                    # Build caption with video info
-                    title = video_info.get('title', 'Unknown')
-                    caption = f"ℹ️ {title}"
-                    
-                    # Get thumbnail URL
-                    thumbnail_url = video_info.get('thumbnail')
-                    
-                    # Delete loading message
-                    if status_message:
-                        try:
-                            await status_message.delete()
-                        except:
-                            pass
-                        status_message = None
-                    
-                    # Send photo with quality selection buttons
-                    if thumbnail_url:
-                        try:
-                            await update.message.reply_photo(
-                                photo=thumbnail_url,
-                                caption=caption,
-                                reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
-                            )
-                            return
-                        except Exception as e:
-                            logger.debug(f"Failed to send thumbnail: {e}")
-                    
-                    # Fallback to text message if thumbnail fails
-                    await update.message.reply_text(
-                        caption,
-                        reply_markup=self.keyboard_builder.build_format_selection_keyboard(user_id, formats)
-                    )
-                    return
+                    except Exception as e:
+                        logger.debug(f"Failed to send thumbnail: {e}")
+                
+                await update.message.reply_text(
+                    caption,
+                    reply_markup=keyboard
+                )
+                return
             
             # For non-YouTube platforms - download immediately with best quality
             if status_message:
                 try:
                     await status_message.delete()
-                except:
+                except Exception:
                     pass
                 status_message = None
             
@@ -269,7 +228,7 @@ class MessageHandlers:
             if status_message:
                 try:
                     await status_message.delete()
-                except:
+                except Exception:
                     pass
 
     async def _download_instagram_story_with_fallback(self, downloader, url: str, update: Update):

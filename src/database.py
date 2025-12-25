@@ -16,11 +16,11 @@ if not MONGODB_URI:
         "Please set it to your MongoDB connection string, e.g.:\n"
         "  - Local: mongodb://localhost:27017\n"
         "  - Docker: mongodb://host.docker.internal:27017\n"
-        "  - Atlas: mongodb+srv://user:pass@cluster.mongodb.net/zenload"
+        "  - Atlas: mongodb+srv://user:pass@cluster.mongodb.net/zeroload"
     )
 
 client = MongoClient(MONGODB_URI)
-db: Database = client.zenload
+db: Database = client.zeroload
 
 @dataclass
 class UserSettings:

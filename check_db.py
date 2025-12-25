@@ -9,7 +9,7 @@ load_dotenv()
 
 # Connect to MongoDB
 client = MongoClient(os.getenv('MONGODB_URI'))
-db = client.zenload
+db = client.zeroload
 
 def print_separator():
     print("\n" + "="*50 + "\n")

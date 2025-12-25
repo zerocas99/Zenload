@@ -9,7 +9,7 @@ import platform
 # Load environment variables before importing other modules
 load_dotenv()
 
-from .bot import ZenloadBot
+from .bot import ZeroLoadBot
 
 def handle_exception(loop, context):
     """Handle exceptions in the event loop."""
@@ -30,7 +30,7 @@ def main():
         loop.set_exception_handler(handle_exception)
         
         # Initialize bot
-        bot = ZenloadBot()
+        bot = ZeroLoadBot()
         
         # Set up signal handling based on platform
         if platform.system() != 'Windows':
@@ -51,7 +51,7 @@ def main():
             signal.signal(signal.SIGTERM, signal_handler)
         
         # Start the bot
-        logging.info("Starting Zenload bot...")
+        logging.info("Starting ZeroLoad bot...")
         bot.run()
         
     except Exception as e:
@@ -62,6 +62,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 

@@ -32,12 +32,11 @@ if __name__ == "__main__":
         health_thread.start()
         logging.info(f"Health check server started on port {os.getenv('PORT', 8080)}")
         
-        from src.bot import ZenloadBot
+        from src.bot import ZeroLoadBot
         # Initialize and run the bot
-        bot = ZenloadBot()
+        bot = ZeroLoadBot()
         bot.run()
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         raise
-
 

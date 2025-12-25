@@ -4,7 +4,7 @@ from typing import Dict, Any
 LOCALES: Dict[str, Dict[str, str]] = {
     'ru': {
         'welcome': (
-            "⚡ ZenLoad\n\n"
+            "⚡ ZeroLoad\n\n"
             "Скачивай видео и музыку одной ссылкой\n\n"
             "📱 Instagram · TikTok · Pinterest\n"
             "🎬 YouTube · SoundCloud\n\n"
@@ -82,17 +82,17 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "💝 Поддержи разработку\n\n"
             "Выбери сумму в Telegram Stars"
         ),
-        'invoice_title': "Поддержать ZenLoad",
+        'invoice_title': "Поддержать ZeroLoad",
         'invoice_description': "Спасибо за поддержку!",
         'price_label': "💝 100 Stars",
         'payment_support': "По вопросам оплаты: @binarybliss",
         'payment_success': "💝 Спасибо за поддержку!",
         'group_welcome': (
-            "⚡ ZenLoad готов к работе\n\n"
+            "⚡ ZeroLoad готов к работе\n\n"
             "Отправляйте ссылки — бот скачает автоматически"
         ),
         'group_welcome_admin': (
-            "⚡ ZenLoad активирован\n\n"
+            "⚡ ZeroLoad активирован\n\n"
             "Отправляйте ссылки — бот скачает автоматически\n\n"
             "⚙️ Настройки группы: /settings"
         ),
@@ -116,7 +116,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
     },
     'en': {
         'welcome': (
-            "⚡ ZenLoad\n\n"
+            "⚡ ZeroLoad\n\n"
             "Download videos & music with one link\n\n"
             "📱 Instagram · TikTok · Pinterest\n"
             "🎬 YouTube · SoundCloud\n\n"
@@ -194,17 +194,17 @@ LOCALES: Dict[str, Dict[str, str]] = {
             "💝 Support development\n\n"
             "Choose amount in Telegram Stars"
         ),
-        'invoice_title': "Support ZenLoad",
+        'invoice_title': "Support ZeroLoad",
         'invoice_description': "Thank you for your support!",
         'price_label': "💝 100 Stars",
         'payment_support': "Payment support: @binarybliss",
         'payment_success': "💝 Thank you for your support!",
         'group_welcome': (
-            "⚡ ZenLoad is ready\n\n"
+            "⚡ ZeroLoad is ready\n\n"
             "Send links — bot will download automatically"
         ),
         'group_welcome_admin': (
-            "⚡ ZenLoad activated\n\n"
+            "⚡ ZeroLoad activated\n\n"
             "Send links — bot will download automatically\n\n"
             "⚙️ Group settings: /settings"
         ),

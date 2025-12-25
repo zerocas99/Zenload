@@ -19,7 +19,7 @@ from .handlers import CommandHandlers, MessageHandlers, CallbackHandlers, Paymen
 logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
-class ZenloadBot:
+class ZeroLoadBot:
     def __init__(self):
         self.lock_file = None
         self.lock_fd = None
@@ -27,7 +27,7 @@ class ZenloadBot:
         # Try to acquire lock
         try:
             # Use app directory for PID file (works in containers)
-            pid_file = Path(BASE_DIR) / "zenload.pid"
+            pid_file = Path(BASE_DIR) / "zeroload.pid"
             
             self.lock_file = pid_file
             self.lock_fd = os.open(str(self.lock_file), os.O_RDWR | os.O_CREAT, 0o644)
@@ -254,7 +254,7 @@ class ZenloadBot:
 
     def run(self):
         """Start the bot"""
-        logger.info("Starting Zenload bot...")
+        logger.info("Starting ZeroLoad bot...")
         
         # Register signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)

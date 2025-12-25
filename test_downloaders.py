@@ -298,7 +298,7 @@ async def test_yandex():
 
 
 async def main():
-    print("🚀 ZENLOAD DOWNLOADER TEST")
+    print("🚀 ZEROLOAD DOWNLOADER TEST")
     print("=" * 60)
     print("This script tests downloaders without running Telegram bot")
     print()

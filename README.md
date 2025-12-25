@@ -1,4 +1,4 @@
-# Zenload
+# ZeroLoad
 # Database Migrations
 
 The bot now includes automatic database migrations. When updating to a new version:
@@ -44,7 +44,7 @@ YANDEX_MUSIC_TOKEN=your_yandex_token  # Optional
 
 1. Download the deployment script:
 ```bash
-wget https://raw.githubusercontent.com/RoninReilly/Zenload/main/deploy.sh
+wget https://raw.githubusercontent.com/RoninReilly/ZeroLoad/main/deploy.sh
 chmod +x deploy.sh
 ```
 
@@ -55,7 +55,7 @@ chmod +x deploy.sh
 
 The script will:
 - Install required packages (python3, python3-venv, git)
-- Create installation directory (/opt/zenload)
+- Create installation directory (/opt/zeroload)
 - Clone the repository
 - Set up Python environment
 - Install dependencies
@@ -63,7 +63,7 @@ The script will:
 - Prompt for your tokens
 - Start the bot automatically
 
-The bot will be installed in `/opt/zenload` with proper permissions and systemd service configuration.
+The bot will be installed in `/opt/zeroload` with proper permissions and systemd service configuration.
 
 Optional: Add cookies/instagram.txt for enhanced Instagram functionality
 
@@ -85,7 +85,7 @@ The scripts will automatically pull the latest changes and update everything.
 ## Project Structure
 
 ```
-zenload/
+zeroload/
 ├── src/
 │   ├── bot.py          # Bot core
 │   ├── config.py       # Configuration
@@ -116,5 +116,3 @@ zenload/
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-
