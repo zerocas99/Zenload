@@ -14,14 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 class YouTubeDownloader(BaseDownloader):
-    """YouTube downloader that mirrors the lightweight bot in /bot."""
+    """YouTube downloader using yt-dlp (same approach as bot/bot.py)."""
 
+    # Same format as working bot/bot.py
     VIDEO_FORMAT = "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]/best[ext=mp4]/best"
     AUDIO_FORMAT = "bestaudio/best"
 
     def __init__(self):
         super().__init__()
         self.download_dir = DOWNLOADS_DIR
+        self.download_dir.mkdir(exist_ok=True)
         self.max_upload_mb = min(YOUTUBE_MAX_UPLOAD_MB, 2000)
 
     def platform_id(self) -> str:
@@ -131,97 +133,58 @@ class YouTubeDownloader(BaseDownloader):
         return metadata, file_path
 
     def _download_sync(self, url: str, mode: str, format_id: Optional[str]) -> Tuple[Path, Dict]:
-        """Blocking download helper used inside a thread."""
+        """Blocking download helper - same logic as bot/bot.py."""
         opts = self._build_options(mode, format_id)
+        
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            file_path = self._resolve_filepath(info, mode)
+            
+            # Get filepath same way as bot/bot.py
+            if "requested_downloads" in info:
+                file_path = Path(info["requested_downloads"][0]["filepath"])
+            else:
+                file_path = Path(ydl.prepare_filename(info))
+            
+            # For audio, change extension to mp3
+            if mode == "audio":
+                file_path = file_path.with_suffix(".mp3")
+            
+            if not file_path.exists():
+                raise DownloadError("Downloaded file not found")
+            
             return file_path, info
 
     def _build_options(self, mode: str, format_id: Optional[str]) -> Dict:
-        """Build yt-dlp options based on requested mode and selected quality."""
+        """Build yt-dlp options - same as working bot/bot.py."""
         outtmpl = str(self.download_dir / "%(title).200s.%(ext)s")
+        
+        # Base options matching bot/bot.py
         opts: Dict = {
             "outtmpl": outtmpl,
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "progress_hooks": [self._progress_hook],
-            "concurrent_fragment_downloads": 4,
-            "retries": 2,
-            "fragment_retries": 2,
-            "socket_timeout": 20,
         }
 
         if mode == "audio":
             if not self._ffmpeg_ready():
                 raise DownloadError("FFmpeg is required for MP3 conversion")
-            opts.update(
-                {
-                    "format": self.AUDIO_FORMAT,
-                    "postprocessors": [
-                        {
-                            "key": "FFmpegExtractAudio",
-                            "preferredcodec": "mp3",
-                            "preferredquality": "192",
-                        }
-                    ],
-                }
-            )
+            opts.update({
+                "format": self.AUDIO_FORMAT,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }],
+            })
         else:
-            video_format = self._video_format_for_quality(format_id)
-            opts.update(
-                {
-                    "format": video_format,
-                    "merge_output_format": "mp4",
-                }
-            )
+            # Same format as bot/bot.py
+            opts.update({
+                "format": self.VIDEO_FORMAT,
+                "merge_output_format": "mp4",
+            })
 
         return opts
-
-    def _video_format_for_quality(self, quality: Optional[str]) -> str:
-        """Map requested quality to yt-dlp format selector."""
-        try:
-            q_int = int(quality) if quality else None
-        except Exception:
-            q_int = None
-
-        if q_int and q_int >= 1080:
-            return "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]/best[ext=mp4]/best"
-        if q_int and q_int >= 720:
-            return "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]/best[ext=mp4]/best"
-        if q_int and q_int >= 480:
-            return "bv*[ext=mp4][height<=480]+ba[ext=m4a]/b[ext=mp4][height<=480]/best[ext=mp4]/best"
-        return self.VIDEO_FORMAT
-
-    def _resolve_filepath(self, info: Dict, mode: str) -> Path:
-        """Figure out the final file path produced by yt-dlp."""
-        file_path: Optional[Path] = None
-
-        if info.get("requested_downloads"):
-            req = info["requested_downloads"][0]
-            path_str = req.get("filepath") or req.get("_filename")
-            if path_str:
-                file_path = Path(path_str)
-
-        if not file_path and info.get("_filename"):
-            file_path = Path(info["_filename"])
-
-        if not file_path:
-            video_id = info.get("id", "video")
-            for candidate in self.download_dir.glob(f"{video_id}.*"):
-                file_path = candidate
-                break
-
-        if file_path and mode == "audio" and file_path.suffix.lower() != ".mp3":
-            mp3_candidate = file_path.with_suffix(".mp3")
-            if mp3_candidate.exists():
-                file_path = mp3_candidate
-
-        if file_path and file_path.exists():
-            return file_path.resolve()
-
-        raise DownloadError("Downloaded file not found on disk")
 
     @staticmethod
     def _extract_thumbnail(info: Optional[Dict]) -> Optional[str]:
