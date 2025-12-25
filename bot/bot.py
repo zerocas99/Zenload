@@ -8,6 +8,7 @@ import logging
 import shutil
 import json
 from pathlib import Path
+from urllib.parse import quote  # <--- Добавлено для исправления ошибки
 from flask import Flask, request, jsonify, send_file, Response
 import yt_dlp
 
@@ -25,6 +26,8 @@ def _ffmpeg_ok():
 
 def _download_sync(url: str, mode: str):
     """Download video/audio and return filepath with metadata"""
+    # Ограничиваем имя файла, чтобы избежать проблем с файловой системой,
+    # но оригинальное название сохраним в метаданных
     outtmpl = str(DOWNLOAD_DIR / "%(title).200s.%(ext)s")
     
     ydl_opts = {
@@ -74,7 +77,8 @@ def _download_sync(url: str, mode: str):
             else:
                 filepath = Path(ydl.prepare_filename(info))
             
-            if mode == "audio":
+            # Корректировка расширения для аудио, если yt-dlp еще не обновил имя
+            if mode == "audio" and filepath.suffix != ".mp3":
                 filepath = filepath.with_suffix(".mp3")
             
             if not filepath.exists():
@@ -134,14 +138,17 @@ def download():
     if not filepath or not filepath.exists():
         return jsonify({"error": "Download failed"}), 500
     
-    # Read file content
-    with open(filepath, "rb") as f:
-        file_content = f.read()
+    # Читаем файл в память
+    try:
+        with open(filepath, "rb") as f:
+            file_content = f.read()
+    except Exception as e:
+        return jsonify({"error": f"Error reading file: {e}"}), 500
     
-    # Clean up file
+    # Удаляем файл и превью сразу после чтения
     try:
         filepath.unlink(missing_ok=True)
-        # Also clean up thumbnail files
+        # Очистка jpg/webp миниатюр, которые создает yt-dlp
         for thumb in DOWNLOAD_DIR.glob("*.jpg"):
             thumb.unlink(missing_ok=True)
         for thumb in DOWNLOAD_DIR.glob("*.webp"):
@@ -149,10 +156,18 @@ def download():
     except:
         pass
     
-    # Create response with metadata header
+    # Формируем ответ
     response = Response(file_content)
     response.headers["Content-Type"] = "application/octet-stream"
-    response.headers["Content-Disposition"] = f'attachment; filename="{filepath.name}"'
+    
+    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
+    # Кодируем имя файла для использования в HTTP заголовке (RFC 5987)
+    # Это позволяет передавать эмодзи и кириллицу без ошибок gunicorn
+    encoded_filename = quote(filepath.name)
+    response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{encoded_filename}"
+    # -------------------------
+    
+    # json.dumps по умолчанию экранирует non-ASCII символы в \uXXXX, что безопасно для заголовков
     response.headers["X-Metadata"] = json.dumps(metadata)
     
     return response
