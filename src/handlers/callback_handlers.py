@@ -75,6 +75,7 @@ class CallbackHandlers:
         
         # Clear stored URL
         context.user_data.clear()
+        
         # Log quality selection if logger is available
         if self.activity_logger:
             self.activity_logger.log_quality_selection(user_id, url, quality)
@@ -86,7 +87,12 @@ class CallbackHandlers:
                 self.get_message(user_id, 'invalid_url', chat_id, is_admin)
             )
             return
-            return
+        
+        # Remove buttons immediately to prevent multiple clicks
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as e:
+            logger.debug(f"Could not remove buttons: {e}")
         
         # Create fake update object for download manager
         class FakeUpdate:
