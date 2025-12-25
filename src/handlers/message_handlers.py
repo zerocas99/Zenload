@@ -138,12 +138,20 @@ class MessageHandlers:
 
         # Check if YouTube Music - download as audio immediately
         if self._is_youtube_music_url(url):
+            # Send status message
+            settings = self.settings_manager.get_settings(user_id)
+            lang = settings.language
+            if lang == 'ru':
+                status_msg = await update.message.reply_text("🎵 Скачиваю музыку...")
+            else:
+                status_msg = await update.message.reply_text("🎵 Downloading music...")
+            
             download_task = asyncio.create_task(
                 self.download_manager.process_download(
                     downloader, 
                     url, 
                     update, 
-                    None,
+                    status_msg,
                     'audio'  # Always audio for YouTube Music
                 )
             )
