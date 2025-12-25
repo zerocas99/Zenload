@@ -3,6 +3,7 @@ YouTube downloader that uses external YouTube API service
 """
 
 import asyncio
+import json
 import logging
 import os
 import aiohttp
@@ -128,11 +129,25 @@ class YouTubeDownloader(BaseDownloader):
                     timeout=aiohttp.ClientTimeout(total=600)  # 10 min timeout
                 ) as response:
                     if response.status != 200:
-                        error_data = await response.json()
-                        error_msg = error_data.get("error", "Unknown error")
+                        try:
+                            error_data = await response.json()
+                            error_msg = error_data.get("error", "Unknown error")
+                        except:
+                            error_msg = f"HTTP {response.status}"
                         raise DownloadError(f"API error: {error_msg}")
                     
                     self.update_progress("status_downloading", 50)
+                    
+                    # Get metadata from header
+                    metadata_json = response.headers.get("X-Metadata", "{}")
+                    try:
+                        metadata = json.loads(metadata_json)
+                    except:
+                        metadata = {}
+                    
+                    title = metadata.get("title", "")
+                    artist = metadata.get("artist", "")
+                    thumbnail = metadata.get("thumbnail", "")
                     
                     # Get filename from Content-Disposition header
                     content_disp = response.headers.get("Content-Disposition", "")
@@ -156,7 +171,20 @@ class YouTubeDownloader(BaseDownloader):
                     self.update_progress("status_downloading", 100)
                     logger.info(f"[YouTube] Downloaded: {file_path}")
                     
-                    return "", file_path
+                    # Build metadata string for audio
+                    if mode == "audio" and (title or artist or thumbnail):
+                        meta_parts = []
+                        if thumbnail:
+                            meta_parts.append(f"THUMB:{thumbnail}")
+                        if artist and title:
+                            meta_parts.append(f"{artist} - {title}")
+                        elif title:
+                            meta_parts.append(title)
+                        metadata_str = "|".join(meta_parts) if meta_parts else ""
+                    else:
+                        metadata_str = ""
+                    
+                    return metadata_str, file_path
                     
         except aiohttp.ClientError as e:
             logger.error(f"[YouTube] API connection error: {e}")

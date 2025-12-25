@@ -101,7 +101,16 @@ class MessageHandlers:
         if not url:
             return False
         url_lower = url.lower()
-        return any(domain in url_lower for domain in ['youtube.com', 'youtu.be', 'music.youtube.com'])
+        # YouTube Music should be handled separately
+        if 'music.youtube.com' in url_lower:
+            return False
+        return any(domain in url_lower for domain in ['youtube.com', 'youtu.be'])
+
+    def _is_youtube_music_url(self, url: str) -> bool:
+        """Check if URL is from YouTube Music"""
+        if not url:
+            return False
+        return 'music.youtube.com' in url.lower()
 
 
 
@@ -125,6 +134,24 @@ class MessageHandlers:
         # Check if this is Instagram all stories URL
         if hasattr(downloader, '_is_all_stories_url') and downloader._is_all_stories_url(url):
             await self._process_all_stories(url, update, downloader)
+            return
+
+        # Check if YouTube Music - download as audio immediately
+        if self._is_youtube_music_url(url):
+            download_task = asyncio.create_task(
+                self.download_manager.process_download(
+                    downloader, 
+                    url, 
+                    update, 
+                    None,
+                    'audio'  # Always audio for YouTube Music
+                )
+            )
+            task_key = f"{user_id}:{url}"
+            self._download_tasks[task_key] = download_task
+            download_task.add_done_callback(
+                lambda t: self._download_tasks.pop(task_key, None)
+            )
             return
 
         is_youtube = self._is_youtube_url(url)

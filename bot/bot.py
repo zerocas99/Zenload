@@ -4,11 +4,11 @@ Simple HTTP API for downloading YouTube videos/audio using yt-dlp
 """
 
 import os
-import asyncio
 import logging
 import shutil
+import json
 from pathlib import Path
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 import yt_dlp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -24,7 +24,7 @@ def _ffmpeg_ok():
     return shutil.which("ffmpeg") is not None
 
 def _download_sync(url: str, mode: str):
-    """Download video/audio and return filepath"""
+    """Download video/audio and return filepath with metadata"""
     outtmpl = str(DOWNLOAD_DIR / "%(title).200s.%(ext)s")
     
     ydl_opts = {
@@ -39,11 +39,21 @@ def _download_sync(url: str, mode: str):
             return None, None, "ffmpeg is required for MP3"
         ydl_opts.update({
             "format": "bestaudio/best",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                },
+                {
+                    "key": "FFmpegMetadata",
+                    "add_metadata": True,
+                },
+                {
+                    "key": "EmbedThumbnail",
+                },
+            ],
+            "writethumbnail": True,
         })
     else:
         ydl_opts.update({
@@ -55,6 +65,9 @@ def _download_sync(url: str, mode: str):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get("title") or "video"
+            artist = info.get("artist") or info.get("uploader") or info.get("channel") or ""
+            thumbnail = info.get("thumbnail") or ""
+            duration = info.get("duration") or 0
             
             if "requested_downloads" in info:
                 filepath = Path(info["requested_downloads"][0]["filepath"])
@@ -67,7 +80,14 @@ def _download_sync(url: str, mode: str):
             if not filepath.exists():
                 return None, None, "File not found after download"
             
-            return filepath, title, None
+            metadata = {
+                "title": title,
+                "artist": artist,
+                "thumbnail": thumbnail,
+                "duration": duration,
+            }
+            
+            return filepath, metadata, None
             
     except Exception as e:
         log.error(f"Download error: {e}")
@@ -91,7 +111,7 @@ def download():
         "mode": "video" or "audio"
     }
     
-    Returns: file download
+    Returns: file with X-Metadata header containing JSON metadata
     """
     data = request.get_json()
     
@@ -106,7 +126,7 @@ def download():
     
     log.info(f"Download request: {url} ({mode})")
     
-    filepath, title, error = _download_sync(url, mode)
+    filepath, metadata, error = _download_sync(url, mode)
     
     if error:
         return jsonify({"error": error}), 500
@@ -114,19 +134,28 @@ def download():
     if not filepath or not filepath.exists():
         return jsonify({"error": "Download failed"}), 500
     
-    # Send file and delete after
+    # Read file content
+    with open(filepath, "rb") as f:
+        file_content = f.read()
+    
+    # Clean up file
     try:
-        return send_file(
-            filepath,
-            as_attachment=True,
-            download_name=filepath.name
-        )
-    finally:
-        # Clean up file after sending
-        try:
-            filepath.unlink(missing_ok=True)
-        except:
-            pass
+        filepath.unlink(missing_ok=True)
+        # Also clean up thumbnail files
+        for thumb in DOWNLOAD_DIR.glob("*.jpg"):
+            thumb.unlink(missing_ok=True)
+        for thumb in DOWNLOAD_DIR.glob("*.webp"):
+            thumb.unlink(missing_ok=True)
+    except:
+        pass
+    
+    # Create response with metadata header
+    response = Response(file_content)
+    response.headers["Content-Type"] = "application/octet-stream"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filepath.name}"'
+    response.headers["X-Metadata"] = json.dumps(metadata)
+    
+    return response
 
 
 @app.route("/info", methods=["POST"])
@@ -139,7 +168,7 @@ def get_info():
         "url": "https://youtube.com/watch?v=..."
     }
     
-    Returns: JSON with title, thumbnail, duration
+    Returns: JSON with title, thumbnail, duration, artist
     """
     data = request.get_json()
     
@@ -154,9 +183,9 @@ def get_info():
             
             return jsonify({
                 "title": info.get("title"),
+                "artist": info.get("artist") or info.get("uploader") or info.get("channel"),
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
-                "uploader": info.get("uploader"),
             })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
