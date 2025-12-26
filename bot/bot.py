@@ -24,7 +24,7 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 def _ffmpeg_ok():
     return shutil.which("ffmpeg") is not None
 
-def _download_sync(url: str, mode: str):
+def _download_sync(url: str, mode: str, quality: str = "720"):
     """Download video/audio and return filepath with metadata"""
     # Ограничиваем имя файла, чтобы избежать проблем с файловой системой,
     # но оригинальное название сохраним в метаданных
@@ -59,8 +59,14 @@ def _download_sync(url: str, mode: str):
             "writethumbnail": True,
         })
     else:
+        # Video quality selection
+        if quality == "1080":
+            format_str = "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]/best[ext=mp4]/best"
+        else:  # Default 720p
+            format_str = "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]/best[ext=mp4]/best"
+        
         ydl_opts.update({
-            "format": "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]/best[ext=mp4]/best",
+            "format": format_str,
             "merge_output_format": "mp4",
         })
     
@@ -124,13 +130,14 @@ def download():
     
     url = data["url"]
     mode = data.get("mode", "video")
+    quality = data.get("quality", "720")  # 720 or 1080
     
     if mode not in ["video", "audio"]:
         return jsonify({"error": "Mode must be 'video' or 'audio'"}), 400
     
-    log.info(f"Download request: {url} ({mode})")
+    log.info(f"Download request: {url} ({mode}, {quality}p)")
     
-    filepath, metadata, error = _download_sync(url, mode)
+    filepath, metadata, error = _download_sync(url, mode, quality)
     
     if error:
         return jsonify({"error": error}), 500

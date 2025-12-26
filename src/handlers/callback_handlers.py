@@ -83,9 +83,15 @@ class CallbackHandlers:
         # Get downloader
         downloader = DownloaderFactory.get_downloader(url)
         if not downloader:
-            await query.edit_message_text(
-                self.get_message(user_id, 'invalid_url', chat_id, is_admin)
-            )
+            try:
+                await query.edit_message_caption(
+                    caption=self.get_message(user_id, 'invalid_url', chat_id, is_admin),
+                    reply_markup=None
+                )
+            except:
+                await query.edit_message_text(
+                    self.get_message(user_id, 'invalid_url', chat_id, is_admin)
+                )
             return
         
         # Remove buttons and show downloading status
@@ -98,10 +104,25 @@ class CallbackHandlers:
             else:
                 downloading_text = "📥 Downloading... 0%"
             
-            # edit_message_text with reply_markup=None removes buttons
-            status_message = await query.edit_message_text(downloading_text, reply_markup=None)
+            # Try to edit caption first (for photo messages with thumbnail)
+            # Then fall back to edit_message_text (for text-only messages)
+            try:
+                status_message = await query.edit_message_caption(
+                    caption=downloading_text,
+                    reply_markup=None
+                )
+            except Exception:
+                status_message = await query.edit_message_text(
+                    downloading_text,
+                    reply_markup=None
+                )
         except Exception as e:
             logger.debug(f"Could not update message: {e}")
+            # Just remove buttons if we can't edit
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except:
+                pass
             status_message = query.message
         
         # Create fake update object for download manager

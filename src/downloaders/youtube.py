@@ -106,8 +106,9 @@ class YouTubeDownloader(BaseDownloader):
     async def get_formats(self, url: str) -> List[Dict]:
         """Return available formats."""
         return [
-            {"id": "video", "quality": "Video MP4", "ext": "mp4"},
-            {"id": "audio", "quality": "Audio MP3", "ext": "mp3"},
+            {"id": "video_1080", "quality": "🎬 Video 1080p", "ext": "mp4"},
+            {"id": "video", "quality": "🎬 Video 720p", "ext": "mp4"},
+            {"id": "audio", "quality": "🎵 Audio MP3", "ext": "mp3"},
         ]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
@@ -116,16 +117,26 @@ class YouTubeDownloader(BaseDownloader):
             raise DownloadError("YouTube API service not configured (YOUTUBE_API_URL)")
         
         processed_url = self.preprocess_url(url)
-        mode = "audio" if format_id == "audio" else "video"
         
-        logger.info(f"[YouTube] Downloading ({mode}) via API: {processed_url}")
+        # Determine mode and quality from format_id
+        if format_id == "audio":
+            mode = "audio"
+            quality = "720"
+        elif format_id == "video_1080":
+            mode = "video"
+            quality = "1080"
+        else:  # video or default
+            mode = "video"
+            quality = "720"
+        
+        logger.info(f"[YouTube] Downloading ({mode}, {quality}p) via API: {processed_url}")
         self.update_progress("status_downloading", 1)
         
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.api_url}/download",
-                    json={"url": processed_url, "mode": mode},
+                    json={"url": processed_url, "mode": mode, "quality": quality},
                     timeout=aiohttp.ClientTimeout(total=600)  # 10 min timeout
                 ) as response:
                     if response.status != 200:
