@@ -60,7 +60,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         'session_expired': "⏰ Сессия истекла. Отправь ссылку заново.",
         'invalid_url': "❌ Неверная ссылка",
         'error_occurred': "❌ Ошибка при обработке запроса",
-        'error_file_too_large': "❌ Файл слишком большой (более 500MB). Попробуй выбрать качество 720p.",
+        'error_file_too_large': "❌ Файл слишком большой (более 1.5GB). Попробуй выбрать качество 720p.",
         'download_failed': (
             "❌ Ошибка загрузки\n\n"
             "{error}\n\n"
@@ -174,7 +174,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         'session_expired': "⏰ Session expired. Send link again.",
         'invalid_url': "❌ Invalid link",
         'error_occurred': "❌ Error processing request",
-        'error_file_too_large': "❌ File too large (over 500MB). Try selecting 720p quality.",
+        'error_file_too_large': "❌ File too large (over 1.5GB). Try selecting 720p quality.",
         'download_failed': (
             "❌ Download failed\n\n"
             "{error}\n\n"

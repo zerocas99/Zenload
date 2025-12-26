@@ -63,7 +63,16 @@ class DownloadWorker:
                 return
 
             try:
-                await asyncio.wait_for(message.edit_text(new_text), timeout=2.0)
+                # Try edit_text first, then edit_caption for photo messages
+                try:
+                    await asyncio.wait_for(message.edit_text(new_text), timeout=2.0)
+                except BadRequest as e:
+                    if "no text in the message" in str(e).lower():
+                        # This is a photo message, try edit_caption
+                        await asyncio.wait_for(message.edit_caption(caption=new_text), timeout=2.0)
+                    elif "Message is not modified" not in str(e):
+                        raise
+                
                 self._last_status = new_text
                 self._last_progress = progress
                 self._last_update_time = current_time
@@ -71,9 +80,9 @@ class DownloadWorker:
                 logger.debug("Status update timed out, skipping")
             except BadRequest as e:
                 if "Message is not modified" not in str(e):
-                    logger.error(f"Error updating status: {e}")
+                    logger.debug(f"Status update skipped: {e}")
         except Exception as e:
-            logger.error(f"Error updating status: {e}")
+            logger.debug(f"Status update error: {e}")
 
     async def _process_status_updates(self):
         """Process status updates asynchronously"""
@@ -395,38 +404,167 @@ class DownloadWorker:
                 await self.update_status(status_message, user_id, 'status_sending', 0)
             logger.info("Sending file to Telegram...")
             
-            with open(file_path, 'rb') as file:
+            # Get file size
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+            
+            # For Local Bot API, use file path directly (streaming, no memory load)
+            # For standard API, use file object (limited to 50MB anyway)
+            if USE_LOCAL_API:
+                # Local Bot API: pass file path as string for streaming upload
+                # This avoids loading the entire file into memory
+                file_path_str = str(file_path.absolute())
+                
+                # Limit to 1.5GB for Local API (leave some margin from 2GB limit)
+                max_size_mb = 1500
+                if file_size_mb > max_size_mb:
+                    logger.warning(f"File {file_size_mb:.1f}MB exceeds {max_size_mb}MB limit")
+                    await update.effective_message.reply_text(
+                        self.get_message(user_id, 'error_file_too_large')
+                    )
+                    return
+                
+                logger.info(f"Using Local Bot API streaming for {file_size_mb:.1f}MB file: {file_path_str}")
+                
+                # Increase timeouts for large files
+                timeout_seconds = 1200 if file_size_mb > 100 else 600 if file_size_mb > 50 else 120
+                
                 if is_audio_file:
-                    # SoundCloud and YouTube Music - send with reply, thumbnail, title, performer
                     if is_music_platform:
                         # Download thumbnail for music player UI
-                        thumb_data = None
+                        thumb_path = None
                         if thumbnail_url:
                             try:
                                 async with aiohttp.ClientSession() as thumb_session:
                                     async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                                         if resp.status == 200:
-                                            from io import BytesIO
-                                            thumb_data = BytesIO(await resp.read())
-                                            thumb_data.name = "thumb.jpg"
+                                            thumb_path = file_path.parent / f"{file_path.stem}_thumb.jpg"
+                                            with open(thumb_path, 'wb') as tf:
+                                                tf.write(await resp.read())
                             except Exception as e:
                                 logger.debug(f"Failed to download thumbnail: {e}")
                         
                         await update.effective_message.reply_audio(
-                            audio=file,
+                            audio=file_path_str,
                             caption=caption,
                             parse_mode='HTML',
                             title=track_title,
                             performer=track_performer,
-                            thumbnail=thumb_data,
-                            read_timeout=60,
-                            write_timeout=60,
-                            connect_timeout=10,
-                            pool_timeout=10
+                            thumbnail=str(thumb_path) if thumb_path else None,
+                            read_timeout=timeout_seconds,
+                            write_timeout=timeout_seconds,
+                            connect_timeout=30,
+                            pool_timeout=30
                         )
+                        
+                        # Cleanup thumbnail
+                        if thumb_path and thumb_path.exists():
+                            try:
+                                thumb_path.unlink()
+                            except:
+                                pass
                     else:
                         await update.effective_chat.send_audio(
-                            audio=file,
+                            audio=file_path_str,
+                            caption=caption,
+                            parse_mode='HTML',
+                            read_timeout=timeout_seconds,
+                            write_timeout=timeout_seconds,
+                            connect_timeout=30,
+                            pool_timeout=30
+                        )
+                elif is_photo_file:
+                    await update.effective_message.reply_photo(
+                        photo=file_path_str,
+                        caption=caption,
+                        parse_mode='HTML',
+                        read_timeout=timeout_seconds,
+                        write_timeout=timeout_seconds,
+                        connect_timeout=30,
+                        pool_timeout=30
+                    )
+                else:
+                    # Video - download thumbnail to file for streaming
+                    thumb_path = None
+                    if thumbnail_url:
+                        try:
+                            async with aiohttp.ClientSession() as thumb_session:
+                                async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                    if resp.status == 200:
+                                        thumb_path = file_path.parent / f"{file_path.stem}_thumb.jpg"
+                                        with open(thumb_path, 'wb') as tf:
+                                            tf.write(await resp.read())
+                        except Exception as e:
+                            logger.debug(f"Failed to download video thumbnail: {e}")
+                    
+                    await update.effective_message.reply_video(
+                        video=file_path_str,
+                        caption=caption,
+                        parse_mode='HTML',
+                        supports_streaming=True,
+                        duration=video_duration,
+                        thumbnail=str(thumb_path) if thumb_path else None,
+                        read_timeout=timeout_seconds,
+                        write_timeout=timeout_seconds,
+                        connect_timeout=30,
+                        pool_timeout=30
+                    )
+                    
+                    # Cleanup thumbnail
+                    if thumb_path and thumb_path.exists():
+                        try:
+                            thumb_path.unlink()
+                        except:
+                            pass
+            else:
+                # Standard API: use file object (max 50MB)
+                max_size_mb = 50
+                if file_size_mb > max_size_mb:
+                    logger.warning(f"File {file_size_mb:.1f}MB exceeds {max_size_mb}MB limit")
+                    await update.effective_message.reply_text(
+                        self.get_message(user_id, 'error_file_too_large')
+                    )
+                    return
+                
+                with open(file_path, 'rb') as file:
+                    if is_audio_file:
+                        if is_music_platform:
+                            thumb_data = None
+                            if thumbnail_url:
+                                try:
+                                    async with aiohttp.ClientSession() as thumb_session:
+                                        async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                            if resp.status == 200:
+                                                from io import BytesIO
+                                                thumb_data = BytesIO(await resp.read())
+                                                thumb_data.name = "thumb.jpg"
+                                except Exception as e:
+                                    logger.debug(f"Failed to download thumbnail: {e}")
+                            
+                            await update.effective_message.reply_audio(
+                                audio=file,
+                                caption=caption,
+                                parse_mode='HTML',
+                                title=track_title,
+                                performer=track_performer,
+                                thumbnail=thumb_data,
+                                read_timeout=60,
+                                write_timeout=60,
+                                connect_timeout=10,
+                                pool_timeout=10
+                            )
+                        else:
+                            await update.effective_chat.send_audio(
+                                audio=file,
+                                caption=caption,
+                                parse_mode='HTML',
+                                read_timeout=30,
+                                write_timeout=30,
+                                connect_timeout=10,
+                                pool_timeout=10
+                            )
+                    elif is_photo_file:
+                        await update.effective_message.reply_photo(
+                            photo=file,
                             caption=caption,
                             parse_mode='HTML',
                             read_timeout=30,
@@ -434,64 +572,31 @@ class DownloadWorker:
                             connect_timeout=10,
                             pool_timeout=10
                         )
-                elif is_photo_file:
-                    await update.effective_message.reply_photo(
-                        photo=file,
-                        caption=caption,
-                        parse_mode='HTML',
-                        read_timeout=30,
-                        write_timeout=30,
-                        connect_timeout=10,
-                        pool_timeout=10
-                    )
-                else:
-                    # Get file size to check Telegram limit
-                    file_size_mb = file_path.stat().st_size / (1024 * 1024)
-                    
-                    # Local Bot API allows up to 2GB, but we limit to 500MB to avoid OOM
-                    # Standard API only 50MB
-                    max_size_mb = 500 if USE_LOCAL_API else 50
-                    
-                    # Check file size limit
-                    if file_size_mb > max_size_mb:
-                        logger.warning(f"File {file_size_mb:.1f}MB exceeds {max_size_mb}MB limit")
-                        await update.effective_message.reply_text(
-                            self.get_message(user_id, 'error_file_too_large')
+                    else:
+                        video_thumb = None
+                        if thumbnail_url:
+                            try:
+                                async with aiohttp.ClientSession() as thumb_session:
+                                    async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                        if resp.status == 200:
+                                            from io import BytesIO
+                                            video_thumb = BytesIO(await resp.read())
+                                            video_thumb.name = "thumb.jpg"
+                            except Exception as e:
+                                logger.debug(f"Failed to download video thumbnail: {e}")
+                        
+                        await update.effective_message.reply_video(
+                            video=file,
+                            caption=caption,
+                            parse_mode='HTML',
+                            supports_streaming=True,
+                            duration=video_duration,
+                            thumbnail=video_thumb,
+                            read_timeout=120,
+                            write_timeout=120,
+                            connect_timeout=30,
+                            pool_timeout=30
                         )
-                        return
-                    
-                    # Log if using Local API for large file
-                    if file_size_mb > 50:
-                        logger.info(f"Using Local Bot API for {file_size_mb:.1f}MB file")
-                    
-                    # Get thumbnail for video
-                    video_thumb = None
-                    if thumbnail_url:
-                        try:
-                            async with aiohttp.ClientSession() as thumb_session:
-                                async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                    if resp.status == 200:
-                                        from io import BytesIO
-                                        video_thumb = BytesIO(await resp.read())
-                                        video_thumb.name = "thumb.jpg"
-                        except Exception as e:
-                            logger.debug(f"Failed to download video thumbnail: {e}")
-                    
-                    # Increase timeouts for large files
-                    timeout_seconds = 600 if file_size_mb > 50 else 120
-                    
-                    await update.effective_message.reply_video(
-                        video=file,
-                        caption=caption,
-                        parse_mode='HTML',
-                        supports_streaming=True,
-                        duration=video_duration,
-                        thumbnail=video_thumb,
-                        read_timeout=timeout_seconds,
-                        write_timeout=timeout_seconds,
-                        connect_timeout=30,
-                        pool_timeout=30
-                    )
             if status_message:
                 await self.update_status(status_message, user_id, 'status_sending', 100)
             logger.info("File sent successfully")
