@@ -107,7 +107,7 @@ class KeyboardBuilder:
             
             # Add warning for high quality (large files)
             if num >= 1080:
-                label = f"🎬 {quality} (⏳)"
+                label = f"📹 {quality} (HD)"
             else:
                 label = f"🎬 {quality}"
             

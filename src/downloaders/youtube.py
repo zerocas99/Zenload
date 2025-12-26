@@ -106,9 +106,9 @@ class YouTubeDownloader(BaseDownloader):
     async def get_formats(self, url: str) -> List[Dict]:
         """Return available formats."""
         return [
-            {"id": "video_1080", "quality": "🎬 Video 1080p", "ext": "mp4"},
-            {"id": "video", "quality": "🎬 Video 720p", "ext": "mp4"},
-            {"id": "audio", "quality": "🎵 Audio MP3", "ext": "mp3"},
+            {"id": "1080", "quality": "1080p", "ext": "mp4"},
+            {"id": "720", "quality": "720p", "ext": "mp4"},
+            {"id": "audio", "quality": "Audio MP3", "ext": "mp3"},
         ]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
@@ -122,10 +122,10 @@ class YouTubeDownloader(BaseDownloader):
         if format_id == "audio":
             mode = "audio"
             quality = "720"
-        elif format_id == "video_1080":
+        elif format_id == "1080":
             mode = "video"
             quality = "1080"
-        else:  # video or default
+        else:  # 720 or default
             mode = "video"
             quality = "720"
         

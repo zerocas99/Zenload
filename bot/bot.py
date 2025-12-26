@@ -145,36 +145,36 @@ def download():
     if not filepath or not filepath.exists():
         return jsonify({"error": "Download failed"}), 500
     
-    # Читаем файл в память
-    try:
-        with open(filepath, "rb") as f:
-            file_content = f.read()
-    except Exception as e:
-        return jsonify({"error": f"Error reading file: {e}"}), 500
+    # Get file size for Content-Length header
+    file_size = filepath.stat().st_size
     
-    # Удаляем файл и превью сразу после чтения
-    try:
-        filepath.unlink(missing_ok=True)
-        # Очистка jpg/webp миниатюр, которые создает yt-dlp
-        for thumb in DOWNLOAD_DIR.glob("*.jpg"):
-            thumb.unlink(missing_ok=True)
-        for thumb in DOWNLOAD_DIR.glob("*.webp"):
-            thumb.unlink(missing_ok=True)
-    except:
-        pass
-    
-    # Формируем ответ
-    response = Response(file_content)
-    response.headers["Content-Type"] = "application/octet-stream"
-    
-    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
     # Кодируем имя файла для использования в HTTP заголовке (RFC 5987)
-    # Это позволяет передавать эмодзи и кириллицу без ошибок gunicorn
     encoded_filename = quote(filepath.name)
-    response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{encoded_filename}"
-    # -------------------------
     
-    # json.dumps по умолчанию экранирует non-ASCII символы в \uXXXX, что безопасно для заголовков
+    def generate():
+        """Stream file in chunks to avoid memory issues"""
+        try:
+            with open(filepath, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 64)  # 64KB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            # Cleanup after streaming
+            try:
+                filepath.unlink(missing_ok=True)
+                for thumb in DOWNLOAD_DIR.glob("*.jpg"):
+                    thumb.unlink(missing_ok=True)
+                for thumb in DOWNLOAD_DIR.glob("*.webp"):
+                    thumb.unlink(missing_ok=True)
+            except:
+                pass
+    
+    # Stream response instead of loading into memory
+    response = Response(generate(), mimetype="application/octet-stream")
+    response.headers["Content-Length"] = str(file_size)
+    response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{encoded_filename}"
     response.headers["X-Metadata"] = json.dumps(metadata)
     
     return response
