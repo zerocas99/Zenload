@@ -3,6 +3,7 @@ from pathlib import Path
 from telegram import Update, Message
 from telegram.error import BadRequest
 from ..downloaders import DownloadError
+from ..config import TELEGRAM_LOCAL_API_URL
 import asyncio
 from functools import partial
 import queue
@@ -17,6 +18,9 @@ from collections import defaultdict
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# Check if using Local Bot API (allows files up to 2GB)
+USE_LOCAL_API = bool(TELEGRAM_LOCAL_API_URL)
 
 class DownloadWorker:
     """Worker class to handle individual downloads"""
@@ -522,11 +526,20 @@ class DownloadWorker:
                         pool_timeout=10
                     )
                 else:
-                    # Get file size to check Telegram limit (50MB for video)
+                    # Get file size to check Telegram limit
                     file_size_mb = file_path.stat().st_size / (1024 * 1024)
                     
-                    # If file > 50MB, compress it
-                    if file_size_mb > 50:
+                    # Local Bot API allows up to 2GB, standard API only 50MB
+                    max_size_mb = 2000 if USE_LOCAL_API else 50
+                    
+                    # If file > limit and not using Local API, try to compress
+                    if file_size_mb > max_size_mb:
+                        logger.warning(f"File {file_size_mb:.1f}MB exceeds {max_size_mb}MB limit")
+                        await update.effective_message.reply_text(
+                            self.get_message(user_id, 'error_file_too_large')
+                        )
+                        return
+                    elif file_size_mb > 50 and not USE_LOCAL_API:
                         logger.info(f"File {file_size_mb:.1f}MB > 50MB, compressing...")
                         if status_message:
                             await self.update_status(status_message, user_id, 'status_compressing', 0)
@@ -555,6 +568,10 @@ class DownloadWorker:
                             logger.info("File sent as document")
                             return
                     
+                    # Log if using Local API for large file
+                    if file_size_mb > 50 and USE_LOCAL_API:
+                        logger.info(f"Using Local Bot API for {file_size_mb:.1f}MB file")
+                    
                     # Get thumbnail for video
                     video_thumb = None
                     if thumbnail_url:
@@ -568,6 +585,9 @@ class DownloadWorker:
                         except Exception as e:
                             logger.debug(f"Failed to download video thumbnail: {e}")
                     
+                    # Increase timeouts for large files (Local API)
+                    timeout_seconds = 600 if file_size_mb > 50 else 120
+                    
                     await update.effective_message.reply_video(
                         video=file,
                         caption=caption,
@@ -575,10 +595,10 @@ class DownloadWorker:
                         supports_streaming=True,
                         duration=video_duration,
                         thumbnail=video_thumb,
-                        read_timeout=120,
-                        write_timeout=120,
-                        connect_timeout=10,
-                        pool_timeout=10
+                        read_timeout=timeout_seconds,
+                        write_timeout=timeout_seconds,
+                        connect_timeout=30,
+                        pool_timeout=30
                     )
             if status_message:
                 await self.update_status(status_message, user_id, 'status_sending', 100)

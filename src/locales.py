@@ -60,6 +60,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         'session_expired': "⏰ Сессия истекла. Отправь ссылку заново.",
         'invalid_url': "❌ Неверная ссылка",
         'error_occurred': "❌ Ошибка при обработке запроса",
+        'error_file_too_large': "❌ Файл слишком большой (более 2GB)",
         'download_failed': (
             "❌ Ошибка загрузки\n\n"
             "{error}\n\n"
@@ -173,6 +174,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         'session_expired': "⏰ Session expired. Send link again.",
         'invalid_url': "❌ Invalid link",
         'error_occurred': "❌ Error processing request",
+        'error_file_too_large': "❌ File too large (over 2GB)",
         'download_failed': (
             "❌ Download failed\n\n"
             "{error}\n\n"
