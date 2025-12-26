@@ -88,11 +88,21 @@ class CallbackHandlers:
             )
             return
         
-        # Remove buttons immediately to prevent multiple clicks
+        # Remove buttons and show downloading status
+        status_message = None
         try:
-            await query.edit_message_reply_markup(reply_markup=None)
+            # Get localized "Downloading..." text
+            settings = self.settings_manager.get_settings(user_id, chat_id, is_admin)
+            if settings.language == 'ru':
+                downloading_text = "📥 Загрузка... 0%"
+            else:
+                downloading_text = "📥 Downloading... 0%"
+            
+            # edit_message_text returns the edited message
+            status_message = await query.edit_message_text(downloading_text)
         except Exception as e:
-            logger.debug(f"Could not remove buttons: {e}")
+            logger.debug(f"Could not update message: {e}")
+            status_message = query.message
         
         # Create fake update object for download manager
         class FakeUpdate:
@@ -112,7 +122,7 @@ class CallbackHandlers:
             downloader, 
             url, 
             fake_update,
-            query.message, 
+            status_message, 
             quality
         )
 

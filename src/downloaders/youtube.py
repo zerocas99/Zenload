@@ -111,7 +111,7 @@ class YouTubeDownloader(BaseDownloader):
         ]
 
     async def download(self, url: str, format_id: Optional[str] = None) -> Tuple[str, Path]:
-        """Download via YouTube API service."""
+        """Download via YouTube API service with detailed progress."""
         if not self.api_url:
             raise DownloadError("YouTube API service not configured (YOUTUBE_API_URL)")
         
@@ -119,7 +119,7 @@ class YouTubeDownloader(BaseDownloader):
         mode = "audio" if format_id == "audio" else "video"
         
         logger.info(f"[YouTube] Downloading ({mode}) via API: {processed_url}")
-        self.update_progress("status_downloading", 10)
+        self.update_progress("status_downloading", 1)
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -136,8 +136,6 @@ class YouTubeDownloader(BaseDownloader):
                             error_msg = f"HTTP {response.status}"
                         raise DownloadError(f"API error: {error_msg}")
                     
-                    self.update_progress("status_downloading", 50)
-                    
                     # Get metadata from header
                     metadata_json = response.headers.get("X-Metadata", "{}")
                     try:
@@ -152,25 +150,41 @@ class YouTubeDownloader(BaseDownloader):
                     
                     # Get filename from Content-Disposition header
                     content_disp = response.headers.get("Content-Disposition", "")
-                    if "filename=" in content_disp:
+                    if "filename*=" in content_disp:
+                        # RFC 5987 encoded filename
+                        from urllib.parse import unquote
+                        filename = content_disp.split("filename*=UTF-8''")[-1].strip()
+                        filename = unquote(filename)
+                    elif "filename=" in content_disp:
                         filename = content_disp.split("filename=")[-1].strip('"')
                     else:
                         ext = "mp3" if mode == "audio" else "mp4"
                         video_id = self._extract_video_id(processed_url) or "video"
                         filename = f"{video_id}.{ext}"
                     
-                    # Download file
+                    # Get content length for progress
+                    content_length = response.headers.get("Content-Length")
+                    total_size = int(content_length) if content_length else 0
+                    
+                    # Download file with progress
                     file_path = self.download_dir / filename
-                    content = await response.read()
+                    downloaded = 0
                     
                     with open(file_path, "wb") as f:
-                        f.write(content)
+                        async for chunk in response.content.iter_chunked(1024 * 64):  # 64KB chunks
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            # Update progress (10-90% range for download)
+                            if total_size > 0:
+                                progress = int((downloaded / total_size) * 80) + 10
+                                self.update_progress("status_downloading", min(progress, 90))
                     
                     if not file_path.exists() or file_path.stat().st_size < 1000:
                         raise DownloadError("Downloaded file is too small or missing")
                     
                     self.update_progress("status_downloading", 100)
-                    logger.info(f"[YouTube] Downloaded: {file_path}")
+                    logger.info(f"[YouTube] Downloaded: {file_path} ({downloaded / (1024*1024):.1f}MB)")
                     
                     # Build metadata string
                     meta_parts = []
