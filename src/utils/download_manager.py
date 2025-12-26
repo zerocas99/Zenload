@@ -448,8 +448,9 @@ class DownloadWorker:
                     # Get file size to check Telegram limit
                     file_size_mb = file_path.stat().st_size / (1024 * 1024)
                     
-                    # Local Bot API allows up to 2GB, standard API only 50MB
-                    max_size_mb = 2000 if USE_LOCAL_API else 50
+                    # Local Bot API allows up to 2GB, but we limit to 500MB to avoid OOM
+                    # Standard API only 50MB
+                    max_size_mb = 500 if USE_LOCAL_API else 50
                     
                     # Check file size limit
                     if file_size_mb > max_size_mb:
