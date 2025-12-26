@@ -319,14 +319,27 @@ class DownloadWorker:
             metadata, file_path = result
             logger.info(f"Download completed. File path: {file_path}")
             
-            # Extract thumbnail URL and track info if present in metadata
+            # Extract thumbnail URL, duration and track info if present in metadata
             thumbnail_url = None
+            video_duration = None
             track_title = None
             track_performer = None
-            if metadata and metadata.startswith("THUMB:"):
-                parts = metadata.split("|", 1)
-                thumbnail_url = parts[0].replace("THUMB:", "")
-                metadata = parts[1] if len(parts) > 1 else ""
+            
+            # Parse metadata format: "THUMB:url|DURATION:123|other info"
+            if metadata:
+                parts = metadata.split("|")
+                remaining_parts = []
+                for part in parts:
+                    if part.startswith("THUMB:"):
+                        thumbnail_url = part.replace("THUMB:", "")
+                    elif part.startswith("DURATION:"):
+                        try:
+                            video_duration = int(part.replace("DURATION:", ""))
+                        except:
+                            pass
+                    else:
+                        remaining_parts.append(part)
+                metadata = "|".join(remaining_parts)
             
             # Extract title and performer from metadata for music player UI
             # Format: "title | By: artist | Length: X:XX | Plays: XXK | <a href="url">Ссылка</a>"
@@ -428,16 +441,47 @@ class DownloadWorker:
                         pool_timeout=10
                     )
                 else:
-                    await update.effective_message.reply_video(
-                        video=file,
-                        caption=caption,
-                        parse_mode='HTML',
-                        supports_streaming=True,
-                        read_timeout=120,
-                        write_timeout=120,
-                        connect_timeout=10,
-                        pool_timeout=10
-                    )
+                    # Get file size to check Telegram limit (50MB for video, 2GB for document)
+                    file_size_mb = file_path.stat().st_size / (1024 * 1024)
+                    
+                    if file_size_mb > 50:
+                        # File too large for video, send as document
+                        logger.info(f"File {file_size_mb:.1f}MB > 50MB, sending as document")
+                        await update.effective_message.reply_document(
+                            document=file,
+                            caption=caption,
+                            parse_mode='HTML',
+                            read_timeout=300,
+                            write_timeout=300,
+                            connect_timeout=10,
+                            pool_timeout=10
+                        )
+                    else:
+                        # Get thumbnail for video
+                        video_thumb = None
+                        if thumbnail_url:
+                            try:
+                                async with aiohttp.ClientSession() as thumb_session:
+                                    async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                        if resp.status == 200:
+                                            from io import BytesIO
+                                            video_thumb = BytesIO(await resp.read())
+                                            video_thumb.name = "thumb.jpg"
+                            except Exception as e:
+                                logger.debug(f"Failed to download video thumbnail: {e}")
+                        
+                        await update.effective_message.reply_video(
+                            video=file,
+                            caption=caption,
+                            parse_mode='HTML',
+                            supports_streaming=True,
+                            duration=video_duration,
+                            thumbnail=video_thumb,
+                            read_timeout=120,
+                            write_timeout=120,
+                            connect_timeout=10,
+                            pool_timeout=10
+                        )
             if status_message:
                 await self.update_status(status_message, user_id, 'status_sending', 100)
             logger.info("File sent successfully")

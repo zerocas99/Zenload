@@ -148,6 +148,7 @@ class YouTubeDownloader(BaseDownloader):
                     title = metadata.get("title", "")
                     artist = metadata.get("artist", "")
                     thumbnail = metadata.get("thumbnail", "")
+                    duration = metadata.get("duration", 0)
                     
                     # Get filename from Content-Disposition header
                     content_disp = response.headers.get("Content-Disposition", "")
@@ -171,18 +172,19 @@ class YouTubeDownloader(BaseDownloader):
                     self.update_progress("status_downloading", 100)
                     logger.info(f"[YouTube] Downloaded: {file_path}")
                     
-                    # Build metadata string for audio
-                    if mode == "audio" and (title or artist or thumbnail):
-                        meta_parts = []
-                        if thumbnail:
-                            meta_parts.append(f"THUMB:{thumbnail}")
+                    # Build metadata string
+                    meta_parts = []
+                    if thumbnail:
+                        meta_parts.append(f"THUMB:{thumbnail}")
+                    if duration:
+                        meta_parts.append(f"DURATION:{duration}")
+                    if mode == "audio" and (title or artist):
                         if artist and title:
                             meta_parts.append(f"{artist} - {title}")
                         elif title:
                             meta_parts.append(title)
-                        metadata_str = "|".join(meta_parts) if meta_parts else ""
-                    else:
-                        metadata_str = ""
+                    
+                    metadata_str = "|".join(meta_parts) if meta_parts else ""
                     
                     return metadata_str, file_path
                     
