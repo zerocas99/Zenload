@@ -116,26 +116,28 @@ class DownloadWorker:
                 str(input_path)
             ]
             result = await asyncio.to_thread(
-                subprocess.run, probe_cmd, capture_output=True, text=True
+                subprocess.run, probe_cmd, capture_output=True, text=True, timeout=30
             )
             duration = float(result.stdout.strip()) if result.stdout.strip() else 60
             
             # Calculate target bitrate (in kbps)
-            # target_size_kb = target_mb * 1024
-            # total_bitrate = (target_size_kb * 8) / duration
-            # video_bitrate = total_bitrate - 128 (for audio)
             target_size_bits = target_mb * 1024 * 1024 * 8
             total_bitrate = int(target_size_bits / duration / 1000)  # kbps
-            video_bitrate = max(500, total_bitrate - 128)  # Reserve 128kbps for audio
+            video_bitrate = total_bitrate - 128  # Reserve 128kbps for audio
+            
+            # If bitrate would be too low (< 800kbps), skip compression
+            # Quality would be too bad and compression takes too long
+            if video_bitrate < 800:
+                logger.info(f"Video too long ({duration:.0f}s), bitrate would be {video_bitrate}kbps - skipping compression")
+                return None
             
             output_path = input_path.parent / f"compressed_{input_path.name}"
             
-            # Two-pass encoding for better quality at target size
-            # Using single pass for speed
+            # Use ultrafast preset for speed, sacrifice some quality
             compress_cmd = [
                 "ffmpeg", "-y", "-i", str(input_path),
                 "-c:v", "libx264",
-                "-preset", "fast",
+                "-preset", "ultrafast",
                 "-b:v", f"{video_bitrate}k",
                 "-maxrate", f"{int(video_bitrate * 1.5)}k",
                 "-bufsize", f"{video_bitrate * 2}k",
@@ -147,8 +149,9 @@ class DownloadWorker:
             
             logger.info(f"Compressing video: {video_bitrate}kbps for {duration:.0f}s")
             
+            # Timeout: max 3 minutes for compression
             process = await asyncio.to_thread(
-                subprocess.run, compress_cmd, capture_output=True
+                subprocess.run, compress_cmd, capture_output=True, timeout=180
             )
             
             if process.returncode != 0:
@@ -169,6 +172,9 @@ class DownloadWorker:
             
             return None
             
+        except subprocess.TimeoutExpired:
+            logger.warning("Compression timeout (>3min), sending as document")
+            return None
         except Exception as e:
             logger.error(f"Video compression failed: {e}")
             return None
