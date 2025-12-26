@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Check if using Local Bot API (allows files up to 2GB)
 USE_LOCAL_API = bool(TELEGRAM_LOCAL_API_URL)
+logger.info(f"Local Bot API configured: {USE_LOCAL_API}, URL: {TELEGRAM_LOCAL_API_URL}")
 
 class DownloadWorker:
     """Worker class to handle individual downloads"""
