@@ -19,7 +19,9 @@ if TOKEN is None:
 
 # Local Bot API Server (for files > 50MB)
 # Set TELEGRAM_LOCAL_API_URL to use local API server (e.g., http://telegram-bot-api:8081)
-TELEGRAM_LOCAL_API_URL = os.getenv("TELEGRAM_LOCAL_API_URL", "")
+# TEMPORARILY DISABLED - server not responding, uncomment when fixed
+# TELEGRAM_LOCAL_API_URL = os.getenv("TELEGRAM_LOCAL_API_URL", "")
+TELEGRAM_LOCAL_API_URL = ""  # Disabled until Local Bot API is fixed
 
 # Platform specific configurations
 YTDLP_OPTIONS = {
