@@ -98,6 +98,81 @@ class DownloadWorker:
         except asyncio.CancelledError:
             pass
 
+    async def _compress_video(self, input_path: Path, target_mb: int = 48) -> Optional[Path]:
+        """Compress video to fit Telegram's 50MB limit using ffmpeg"""
+        import subprocess
+        import shutil
+        
+        if not shutil.which("ffmpeg"):
+            logger.error("ffmpeg not found, cannot compress video")
+            return None
+        
+        try:
+            # Get video duration using ffprobe
+            probe_cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(input_path)
+            ]
+            result = await asyncio.to_thread(
+                subprocess.run, probe_cmd, capture_output=True, text=True
+            )
+            duration = float(result.stdout.strip()) if result.stdout.strip() else 60
+            
+            # Calculate target bitrate (in kbps)
+            # target_size_kb = target_mb * 1024
+            # total_bitrate = (target_size_kb * 8) / duration
+            # video_bitrate = total_bitrate - 128 (for audio)
+            target_size_bits = target_mb * 1024 * 1024 * 8
+            total_bitrate = int(target_size_bits / duration / 1000)  # kbps
+            video_bitrate = max(500, total_bitrate - 128)  # Reserve 128kbps for audio
+            
+            output_path = input_path.parent / f"compressed_{input_path.name}"
+            
+            # Two-pass encoding for better quality at target size
+            # Using single pass for speed
+            compress_cmd = [
+                "ffmpeg", "-y", "-i", str(input_path),
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-b:v", f"{video_bitrate}k",
+                "-maxrate", f"{int(video_bitrate * 1.5)}k",
+                "-bufsize", f"{video_bitrate * 2}k",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-movflags", "+faststart",
+                str(output_path)
+            ]
+            
+            logger.info(f"Compressing video: {video_bitrate}kbps for {duration:.0f}s")
+            
+            process = await asyncio.to_thread(
+                subprocess.run, compress_cmd, capture_output=True
+            )
+            
+            if process.returncode != 0:
+                logger.error(f"ffmpeg error: {process.stderr.decode()[:500]}")
+                return None
+            
+            if output_path.exists():
+                new_size_mb = output_path.stat().st_size / (1024 * 1024)
+                logger.info(f"Compression complete: {new_size_mb:.1f}MB")
+                
+                # Delete original, keep compressed
+                try:
+                    input_path.unlink()
+                except:
+                    pass
+                
+                return output_path
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Video compression failed: {e}")
+            return None
+
     async def progress_callback(self, status: str, progress: int):
         """Async callback for progress updates"""
         try:
@@ -441,47 +516,64 @@ class DownloadWorker:
                         pool_timeout=10
                     )
                 else:
-                    # Get file size to check Telegram limit (50MB for video, 2GB for document)
+                    # Get file size to check Telegram limit (50MB for video)
                     file_size_mb = file_path.stat().st_size / (1024 * 1024)
                     
+                    # If file > 50MB, compress it
                     if file_size_mb > 50:
-                        # File too large for video, send as document
-                        logger.info(f"File {file_size_mb:.1f}MB > 50MB, sending as document")
-                        await update.effective_message.reply_document(
-                            document=file,
-                            caption=caption,
-                            parse_mode='HTML',
-                            read_timeout=300,
-                            write_timeout=300,
-                            connect_timeout=10,
-                            pool_timeout=10
-                        )
-                    else:
-                        # Get thumbnail for video
-                        video_thumb = None
-                        if thumbnail_url:
-                            try:
-                                async with aiohttp.ClientSession() as thumb_session:
-                                    async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                        if resp.status == 200:
-                                            from io import BytesIO
-                                            video_thumb = BytesIO(await resp.read())
-                                            video_thumb.name = "thumb.jpg"
-                            except Exception as e:
-                                logger.debug(f"Failed to download video thumbnail: {e}")
+                        logger.info(f"File {file_size_mb:.1f}MB > 50MB, compressing...")
+                        if status_message:
+                            await self.update_status(status_message, user_id, 'status_compressing', 0)
                         
-                        await update.effective_message.reply_video(
-                            video=file,
-                            caption=caption,
-                            parse_mode='HTML',
-                            supports_streaming=True,
-                            duration=video_duration,
-                            thumbnail=video_thumb,
-                            read_timeout=120,
-                            write_timeout=120,
-                            connect_timeout=10,
-                            pool_timeout=10
-                        )
+                        compressed_path = await self._compress_video(file_path, target_mb=48)
+                        
+                        if compressed_path and compressed_path.exists():
+                            # Use compressed file
+                            file_path = compressed_path
+                            file.close()
+                            file = open(file_path, 'rb')
+                            logger.info(f"Compressed to {file_path.stat().st_size / (1024*1024):.1f}MB")
+                        else:
+                            logger.warning("Compression failed, sending as document")
+                            await update.effective_message.reply_document(
+                                document=file,
+                                caption=caption,
+                                parse_mode='HTML',
+                                read_timeout=300,
+                                write_timeout=300,
+                                connect_timeout=10,
+                                pool_timeout=10
+                            )
+                            if status_message:
+                                await self.update_status(status_message, user_id, 'status_sending', 100)
+                            logger.info("File sent as document")
+                            return
+                    
+                    # Get thumbnail for video
+                    video_thumb = None
+                    if thumbnail_url:
+                        try:
+                            async with aiohttp.ClientSession() as thumb_session:
+                                async with thumb_session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                    if resp.status == 200:
+                                        from io import BytesIO
+                                        video_thumb = BytesIO(await resp.read())
+                                        video_thumb.name = "thumb.jpg"
+                        except Exception as e:
+                            logger.debug(f"Failed to download video thumbnail: {e}")
+                    
+                    await update.effective_message.reply_video(
+                        video=file,
+                        caption=caption,
+                        parse_mode='HTML',
+                        supports_streaming=True,
+                        duration=video_duration,
+                        thumbnail=video_thumb,
+                        read_timeout=120,
+                        write_timeout=120,
+                        connect_timeout=10,
+                        pool_timeout=10
+                    )
             if status_message:
                 await self.update_status(status_message, user_id, 'status_sending', 100)
             logger.info("File sent successfully")

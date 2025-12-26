@@ -100,6 +100,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         # Status messages
         'status_getting_info': "🔍 Получение информации... {progress}%",
         'status_downloading': "📥 Загрузка... {progress}%",
+        'status_compressing': "🗜️ Сжатие видео... {progress}%",
         'status_processing': "⚙️ Обработка... {progress}%",
         'status_sending': "📤 Отправка... {progress}%",
         'status_fallback': "🔄 Пробую альтернативный метод...",
@@ -212,6 +213,7 @@ LOCALES: Dict[str, Dict[str, str]] = {
         # Status messages
         'status_getting_info': "🔍 Getting info... {progress}%",
         'status_downloading': "📥 Downloading... {progress}%",
+        'status_compressing': "🗜️ Compressing video... {progress}%",
         'status_processing': "⚙️ Processing... {progress}%",
         'status_sending': "📤 Sending... {progress}%",
         'status_fallback': "🔄 Trying alternative method...",
