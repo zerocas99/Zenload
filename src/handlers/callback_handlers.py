@@ -98,8 +98,8 @@ class CallbackHandlers:
             else:
                 downloading_text = "📥 Downloading... 0%"
             
-            # edit_message_text returns the edited message
-            status_message = await query.edit_message_text(downloading_text)
+            # edit_message_text with reply_markup=None removes buttons
+            status_message = await query.edit_message_text(downloading_text, reply_markup=None)
         except Exception as e:
             logger.debug(f"Could not update message: {e}")
             status_message = query.message

@@ -102,87 +102,6 @@ class DownloadWorker:
         except asyncio.CancelledError:
             pass
 
-    async def _compress_video(self, input_path: Path, target_mb: int = 48) -> Optional[Path]:
-        """Compress video to fit Telegram's 50MB limit using ffmpeg"""
-        import subprocess
-        import shutil
-        
-        if not shutil.which("ffmpeg"):
-            logger.error("ffmpeg not found, cannot compress video")
-            return None
-        
-        try:
-            # Get video duration using ffprobe
-            probe_cmd = [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(input_path)
-            ]
-            result = await asyncio.to_thread(
-                subprocess.run, probe_cmd, capture_output=True, text=True, timeout=30
-            )
-            duration = float(result.stdout.strip()) if result.stdout.strip() else 60
-            
-            # Calculate target bitrate (in kbps)
-            target_size_bits = target_mb * 1024 * 1024 * 8
-            total_bitrate = int(target_size_bits / duration / 1000)  # kbps
-            video_bitrate = total_bitrate - 128  # Reserve 128kbps for audio
-            
-            # If bitrate would be too low (< 800kbps), skip compression
-            # Quality would be too bad and compression takes too long
-            if video_bitrate < 800:
-                logger.info(f"Video too long ({duration:.0f}s), bitrate would be {video_bitrate}kbps - skipping compression")
-                return None
-            
-            output_path = input_path.parent / f"compressed_{input_path.name}"
-            
-            # Use ultrafast preset for speed, sacrifice some quality
-            compress_cmd = [
-                "ffmpeg", "-y", "-i", str(input_path),
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-b:v", f"{video_bitrate}k",
-                "-maxrate", f"{int(video_bitrate * 1.5)}k",
-                "-bufsize", f"{video_bitrate * 2}k",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-movflags", "+faststart",
-                str(output_path)
-            ]
-            
-            logger.info(f"Compressing video: {video_bitrate}kbps for {duration:.0f}s")
-            
-            # Timeout: max 3 minutes for compression
-            process = await asyncio.to_thread(
-                subprocess.run, compress_cmd, capture_output=True, timeout=180
-            )
-            
-            if process.returncode != 0:
-                logger.error(f"ffmpeg error: {process.stderr.decode()[:500]}")
-                return None
-            
-            if output_path.exists():
-                new_size_mb = output_path.stat().st_size / (1024 * 1024)
-                logger.info(f"Compression complete: {new_size_mb:.1f}MB")
-                
-                # Delete original, keep compressed
-                try:
-                    input_path.unlink()
-                except:
-                    pass
-                
-                return output_path
-            
-            return None
-            
-        except subprocess.TimeoutExpired:
-            logger.warning("Compression timeout (>3min), sending as document")
-            return None
-        except Exception as e:
-            logger.error(f"Video compression failed: {e}")
-            return None
-
     async def progress_callback(self, status: str, progress: int):
         """Async callback for progress updates"""
         try:
@@ -532,44 +451,16 @@ class DownloadWorker:
                     # Local Bot API allows up to 2GB, standard API only 50MB
                     max_size_mb = 2000 if USE_LOCAL_API else 50
                     
-                    # If file > limit and not using Local API, try to compress
+                    # Check file size limit
                     if file_size_mb > max_size_mb:
                         logger.warning(f"File {file_size_mb:.1f}MB exceeds {max_size_mb}MB limit")
                         await update.effective_message.reply_text(
                             self.get_message(user_id, 'error_file_too_large')
                         )
                         return
-                    elif file_size_mb > 50 and not USE_LOCAL_API:
-                        logger.info(f"File {file_size_mb:.1f}MB > 50MB, compressing...")
-                        if status_message:
-                            await self.update_status(status_message, user_id, 'status_compressing', 0)
-                        
-                        compressed_path = await self._compress_video(file_path, target_mb=48)
-                        
-                        if compressed_path and compressed_path.exists():
-                            # Use compressed file
-                            file_path = compressed_path
-                            file.close()
-                            file = open(file_path, 'rb')
-                            logger.info(f"Compressed to {file_path.stat().st_size / (1024*1024):.1f}MB")
-                        else:
-                            logger.warning("Compression failed, sending as document")
-                            await update.effective_message.reply_document(
-                                document=file,
-                                caption=caption,
-                                parse_mode='HTML',
-                                read_timeout=300,
-                                write_timeout=300,
-                                connect_timeout=10,
-                                pool_timeout=10
-                            )
-                            if status_message:
-                                await self.update_status(status_message, user_id, 'status_sending', 100)
-                            logger.info("File sent as document")
-                            return
                     
                     # Log if using Local API for large file
-                    if file_size_mb > 50 and USE_LOCAL_API:
+                    if file_size_mb > 50:
                         logger.info(f"Using Local Bot API for {file_size_mb:.1f}MB file")
                     
                     # Get thumbnail for video
@@ -585,7 +476,7 @@ class DownloadWorker:
                         except Exception as e:
                             logger.debug(f"Failed to download video thumbnail: {e}")
                     
-                    # Increase timeouts for large files (Local API)
+                    # Increase timeouts for large files
                     timeout_seconds = 600 if file_size_mb > 50 else 120
                     
                     await update.effective_message.reply_video(
