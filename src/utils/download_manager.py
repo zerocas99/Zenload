@@ -525,7 +525,7 @@ class DownloadWorker:
                     # Get file size to check Telegram limit (50MB for video)
                     file_size_mb = file_path.stat().st_size / (1024 * 1024)
                     
-                    # If file > 50MB, try to compress it
+                    # If file > 50MB, compress it
                     if file_size_mb > 50:
                         logger.info(f"File {file_size_mb:.1f}MB > 50MB, compressing...")
                         if status_message:
@@ -540,21 +540,19 @@ class DownloadWorker:
                             file = open(file_path, 'rb')
                             logger.info(f"Compressed to {file_path.stat().st_size / (1024*1024):.1f}MB")
                         else:
-                            # Compression failed or skipped - file too large for Telegram
-                            logger.warning(f"Cannot send {file_size_mb:.1f}MB file - too large for Telegram (max 50MB)")
-                            chat_id = update.effective_chat.id
-                            if chat_id < 0:
-                                settings = self.settings_manager.get_settings(chat_id)
-                            else:
-                                settings = self.settings_manager.get_settings(user_id)
-                            lang = settings.language
-                            
-                            if lang == 'ru':
-                                error_msg = f"❌ Файл слишком большой ({file_size_mb:.0f}MB).\n\nTelegram позволяет отправлять видео до 50MB. Это видео слишком длинное для сжатия без потери качества."
-                            else:
-                                error_msg = f"❌ File too large ({file_size_mb:.0f}MB).\n\nTelegram allows videos up to 50MB. This video is too long to compress without quality loss."
-                            
-                            await update.effective_message.reply_text(error_msg)
+                            logger.warning("Compression failed, sending as document")
+                            await update.effective_message.reply_document(
+                                document=file,
+                                caption=caption,
+                                parse_mode='HTML',
+                                read_timeout=300,
+                                write_timeout=300,
+                                connect_timeout=10,
+                                pool_timeout=10
+                            )
+                            if status_message:
+                                await self.update_status(status_message, user_id, 'status_sending', 100)
+                            logger.info("File sent as document")
                             return
                     
                     # Get thumbnail for video

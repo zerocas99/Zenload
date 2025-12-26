@@ -8,7 +8,7 @@ import signal
 import asyncio
 import sys
 
-from .config import TOKEN, LOGGING_CONFIG, BASE_DIR
+from .config import TOKEN, LOGGING_CONFIG, BASE_DIR, TELEGRAM_LOCAL_API_URL
 from .database import UserSettingsManager, UserActivityLogger
 from .locales import Localization
 from .utils import KeyboardBuilder, DownloadManager
@@ -53,7 +53,16 @@ class ZeroLoadBot:
             sys.exit(1)
             
         # Initialize core components
-        self.application = Application.builder().token(TOKEN).build()
+        # Use Local Bot API if configured (allows files up to 2GB)
+        builder = Application.builder().token(TOKEN)
+        if TELEGRAM_LOCAL_API_URL:
+            # Local API server URL (e.g., http://telegram-bot-api:8081/bot)
+            base_url = f"{TELEGRAM_LOCAL_API_URL}/bot"
+            base_file_url = f"{TELEGRAM_LOCAL_API_URL}/file/bot"
+            builder = builder.base_url(base_url).base_file_url(base_file_url).local_mode(True)
+            logger.info(f"Using Local Bot API: {TELEGRAM_LOCAL_API_URL}")
+        
+        self.application = builder.build()
         self.settings_manager = UserSettingsManager()
         self.localization = Localization()
         self.activity_logger = UserActivityLogger(self.settings_manager.db)
